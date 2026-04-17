@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(cargo check:*)",
+      "Bash(cmd.exe /c \"cargo check 2>&1\")",
+      "Bash(cmd.exe /c \"cargo check\")",
+      "Bash(powershell -Command \"Set-Location ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri''; cargo check 2>&1\")",
+      "Bash(powershell -Command \"& { $env:PATH += '';C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin''; Set-Location ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri''; cargo check 2>&1 }\")",
+      "Bash(powershell -Command \"if \\(Test-Path ''C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe''\\) { Write-Host ''found'' } else { Write-Host ''not found'' }\")",
+      "Bash(powershell -Command \"Get-ChildItem -Path ''C:\\\\'' -Recurse -Name ''cargo.exe'' -ErrorAction SilentlyContinue 2>&1 | Select-Object -First 5\")",
+      "Bash(powershell -Command \"npx tauri dev -- --help 2>&1 | head -3\")",
+      "Bash(npx tsc:*)",
+      "Bash(powershell -Command \"Test-Path ''C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe''; Test-Path ''C:\\\\Users\\\\Jean.Galant\\\\.rustup\\\\bin\\\\cargo.exe''; Get-ChildItem ''C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin'' -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty Name\")",
+      "Bash(powershell -Command \"Get-ChildItem ''C:\\\\Users\\\\Jean.Galant'' -Directory | Select-Object Name\")",
+      "Bash(npx tauri:*)",
+      "Bash(powershell -Command \"cd ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri''; cargo check 2>&1\")",
+      "Bash(powershell -Command \"& ''$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo'' check --manifest-path ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml'' 2>&1\")",
+      "Bash(powershell -Command \"& \"\"$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo\"\" check --manifest-path \"\"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml\"\" 2>&1\")",
+      "Bash(powershell -Command \"& {$cargo = Join-Path $env:USERPROFILE ''.cargo\\\\bin\\\\cargo.exe''; & $cargo check --manifest-path ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml'' 2>&1}\")",
+      "Bash(powershell.exe -NoProfile:*)",
+      "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check --manifest-path C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml 2>&1\")",
+      "Bash(find \"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\" -name \".env*\" -exec cat {} \\\\;)"
+    ]
+  }
+}
