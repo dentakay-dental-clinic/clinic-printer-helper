@@ -379,42 +379,49 @@ mod macos_print {
         }
 
         // ── Save to temp file ────────────────────────────────────────────────
-        let tmp = std::env::temp_dir()
-            .join(format!("clinic_{}.pdf",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()))
-            .to_string_lossy()
-            .to_string();
-        let file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-        doc.save(&mut BufWriter::new(file)).map_err(|e| e.to_string())?;
+        // Use /tmp directly — always world-writable on macOS, avoids the
+        // /var/folders/… sandbox path that fails on M1/older macOS.
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let tmp = format!("/tmp/clinic_{}.pdf", millis);
+        let file = fs::File::create(&tmp)
+            .map_err(|e| format!("cannot create temp file {}: {}", tmp, e))?;
+        doc.save(&mut BufWriter::new(file))
+            .map_err(|e| format!("cannot save PDF: {}", e))?;
 
-        // ── Send to printer via lpr ──────────────────────────────────────────
-        // Try with explicit media size first; fall back to no media args
-        // (some CUPS queues don't accept Custom.NxNmm media names).
-        // Use absolute path — Tauri apps don't inherit the full shell PATH
-        let lpr = "/usr/bin/lpr";
-        let out1 = Command::new(lpr)
-            .env("LANG", "C").env("LC_ALL", "C")
-            .args([
-                "-P", printer_name,
-                "-o", &format!("media=Custom.{}x{}mm", W as u32, H as u32),
-                &tmp,
-            ])
-            .output()
-            .map_err(|e| format!("lpr failed: {}", e))?;
+        // ── Send to printer ──────────────────────────────────────────────────
+        // Attempt 1: lpr with explicit media size
+        // Attempt 2: lpr without media (some queues reject Custom.NxNmm)
+        // Attempt 3: lp -d (alternative CUPS frontend, works on some M1 configs)
+        let media_arg = format!("media=Custom.{}x{}mm", W as u32, H as u32);
 
-        let success = if out1.status.success() {
-            true
-        } else {
-            // Retry without media param
-            Command::new(lpr)
+        let try_cmd = |args: &[&str]| -> bool {
+            Command::new(args[0])
                 .env("LANG", "C").env("LC_ALL", "C")
-                .args(["-P", printer_name, &tmp])
+                .args(&args[1..])
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false)
+        };
+
+        let out1 = Command::new("/usr/bin/lpr")
+            .env("LANG", "C").env("LC_ALL", "C")
+            .args(["-P", printer_name, "-o", &media_arg, &tmp])
+            .output();
+
+        let success = match &out1 {
+            Ok(o) if o.status.success() => true,
+            _ => {
+                // Attempt 2: lpr without media
+                if try_cmd(&["/usr/bin/lpr", "-P", printer_name, &tmp]) {
+                    true
+                } else {
+                    // Attempt 3: lp -d
+                    try_cmd(&["/usr/bin/lp", "-d", printer_name, &tmp])
+                }
+            }
         };
 
         let _ = fs::remove_file(&tmp);
@@ -425,9 +432,14 @@ mod macos_print {
                 patients.len(), quantity, printer_name
             ))
         } else {
-            let stderr = String::from_utf8_lossy(&out1.stderr).to_string();
-            Err(format!("lpr error for '{}': {}", printer_name,
-                if stderr.is_empty() { "printer rejected job".to_string() } else { stderr }))
+            let detail = out1.ok().map(|o| {
+                let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                [e, s].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("; ")
+            }).unwrap_or_default();
+            Err(format!("Print failed for '{}': {}",
+                printer_name,
+                if detail.is_empty() { "all lpr/lp attempts rejected the job".to_string() } else { detail }))
         }
     }
 
