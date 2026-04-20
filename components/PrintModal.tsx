@@ -6,11 +6,12 @@ import { LabelPreview } from "./LabelPreview";
 import { StatusBadge } from "./StatusBadge";
 import { formatTime, formatDate, cn } from "@/lib/utils";
 import { Printer, X, Clock, Tag, Minus, Plus } from "lucide-react";
+import { getCachedPatientInfo, cachePatientInfo } from "@/store/PatientInfoCache";
 
 interface PrintModalProps {
   appointment: Appointment;
   defaultQuantity: number;
-  onConfirm: (quantity: number) => void;
+  onConfirm: (quantity: number, filledAppointment: Appointment) => void;
   onClose: () => void;
   isPrinting?: boolean;
 }
@@ -23,6 +24,15 @@ export function PrintModal({
   isPrinting = false,
 }: PrintModalProps) {
   const [quantity, setQuantity] = useState(defaultQuantity);
+  const cached = a.patient_ak ? getCachedPatientInfo(a.patient_ak) : {};
+  const [draftGender, setDraftGender] = useState(a.patient_gender ?? cached.gender ?? "");
+  const [draftBirthDate, setDraftBirthDate] = useState(a.patient_birth_date ?? cached.birthDate ?? "");
+
+  const filledAppointment: Appointment = {
+    ...a,
+    patient_gender: draftGender || a.patient_gender || null,
+    patient_birth_date: draftBirthDate || a.patient_birth_date || null,
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -95,7 +105,15 @@ export function PrintModal({
               className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-40">
               Cancel
             </button>
-            <button onClick={() => onConfirm(quantity)} disabled={isPrinting}
+            <button onClick={() => {
+              if (a.patient_ak) {
+                const toCache: Record<string, string> = {};
+                if (!a.patient_gender && draftGender) toCache.gender = draftGender;
+                if (!a.patient_birth_date && draftBirthDate) toCache.birthDate = draftBirthDate;
+                if (Object.keys(toCache).length > 0) cachePatientInfo(a.patient_ak, toCache);
+              }
+              onConfirm(quantity, filledAppointment);
+            }} disabled={isPrinting}
               className={cn(
                 "flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white",
                 "hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2",
@@ -111,7 +129,11 @@ export function PrintModal({
         <div className="sm:w-[45%] bg-slate-100 dark:bg-slate-800/50 p-5 flex flex-col">
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Label preview</p>
           <div className="flex-1 flex items-start justify-center">
-            <LabelPreview appointment={a} />
+            <LabelPreview
+              appointment={filledAppointment}
+              editGender={!a.patient_gender ? { value: draftGender, onChange: setDraftGender } : undefined}
+              editBirthDate={!a.patient_birth_date ? { value: draftBirthDate, onChange: setDraftBirthDate } : undefined}
+            />
           </div>
           <p className="text-xs text-slate-400 text-center mt-3">
             {quantity} label{quantity !== 1 ? "s" : ""} will print per patient

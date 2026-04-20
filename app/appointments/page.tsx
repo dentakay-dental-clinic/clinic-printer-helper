@@ -101,6 +101,11 @@ function AppointmentsPageInner() {
   const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(null);
   const [isSearchingLive, setIsSearchingLive] = useState(false);
 
+  // Auto-fetch state
+  const [isAutoFetching, setIsAutoFetching] = useState(false);
+  // Enriched patient list for bulk print (after auto-fetch)
+  const [pendingBulkPatients, setPendingBulkPatients] = useState<Appointment[] | null>(null);
+
   // API client for on-demand patient lookup (shares same config as appointments)
   const apiClient = useMemo(() => config ? createClientFromConfig(config) : null, [config]);
 
@@ -130,30 +135,89 @@ function AppointmentsPageInner() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  const handleSinglePrint = useCallback(async (quantity: number) => {
-    if (!printTarget) return;
+  function toTurkishGender(name: string | null): string | null {
+    if (!name) return null;
+    const g = name.toUpperCase();
+    if (g === "MALE" || g === "ERKEK" || g === "M") return "ERKEK";
+    if (g === "FEMALE" || g === "KADIN" || g === "F" || g === "K") return "KADIN";
+    return name;
+  }
+
+  async function enrichPatient(appt: Appointment): Promise<Appointment> {
+    if ((appt.patient_gender && appt.patient_birth_date) || !apiClient || !appt.patient_ak) {
+      return appt;
+    }
+    try {
+      const info = await fetchPatientByAk(apiClient, appt.patient_ak);
+      if (info) {
+        return {
+          ...appt,
+          patient_gender: appt.patient_gender || toTurkishGender(info.gender_name),
+          patient_birth_date: appt.patient_birth_date || info.birth_date || null,
+        };
+      }
+    } catch {}
+    return appt;
+  }
+
+  const handlePrintClick = useCallback(async (appt: Appointment) => {
+    if (appt.patient_gender && appt.patient_birth_date) {
+      setPrintTarget(appt);
+      return;
+    }
+    setIsAutoFetching(true);
+    let enriched = appt;
+    try {
+      enriched = await enrichPatient(appt);
+    } finally {
+      setIsAutoFetching(false);
+    }
+    // Always open PrintModal — user can fill in remaining missing fields inline
+    setPrintTarget(enriched);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiClient]);
+
+  const handleBulkPrintTrigger = useCallback(async () => {
+    const patients = filtered.filter((a) => selectedIds.has(a.appointment_id));
+    const needsFetch = patients.some((p) => !p.patient_gender || !p.patient_birth_date);
+
+    if (!needsFetch) {
+      setPendingBulkPatients(patients);
+      setShowBulkModal(true);
+      return;
+    }
+
+    setIsAutoFetching(true);
+    const enriched = await Promise.all(patients.map((p) => enrichPatient(p)));
+    setIsAutoFetching(false);
+
+    setPendingBulkPatients(enriched);
+    setShowBulkModal(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, selectedIds, apiClient]);
+
+  const handleSinglePrint = useCallback(async (quantity: number, filledAppt: Appointment) => {
     setIsPrinting(true);
     try {
-      // Format the date before sending to the printer service
       const patientToPrint = {
-        ...printTarget,
-        patient_birth_date: formatDisplayDate(printTarget.patient_birth_date),
+        ...filledAppt,
+        patient_birth_date: formatDisplayDate(filledAppt.patient_birth_date),
       };
       const r = await printerService.print({ patients: [patientToPrint], quantity });
       printHistoryStore.add({
         timestamp: Date.now(),
-        patientName: printTarget.patient_name,
-        patientAk: printTarget.patient_ak,
+        patientName: filledAppt.patient_name,
+        patientAk: filledAppt.patient_ak,
         quantity,
         success: r.success,
       });
       showToast(r.message, r.success);
     } catch { showToast("Print failed. Check printer.", false); }
     finally { setIsPrinting(false); setPrintTarget(null); }
-  }, [printTarget, printerService]);
+  }, [printerService]);
 
   const handleBulkPrint = useCallback(async () => {
-    const patients = filtered.filter((a) => selectedIds.has(a.appointment_id));
+    const patients = pendingBulkPatients ?? filtered.filter((a) => selectedIds.has(a.appointment_id));
     setIsPrinting(true);
     setBulkCancelled(false);
     setBulkProgress({ current: 0, total: patients.length });
@@ -183,8 +247,14 @@ function AppointmentsPageInner() {
       showToast(`Printed ${successCount} / ${attempted} patients.`, successCount === attempted && !bulkCancelled);
       clearSelection();
     } catch { showToast("Bulk print failed. Check printer.", false); }
-    finally { setIsPrinting(false); setBulkProgress(undefined); setBulkCancelled(false); setShowBulkModal(false); }
-  }, [filtered, selectedIds, bulkQuantity, bulkCancelled, clearSelection, printerService]);
+    finally {
+      setIsPrinting(false);
+      setBulkProgress(undefined);
+      setBulkCancelled(false);
+      setShowBulkModal(false);
+      setPendingBulkPatients(null);
+    }
+  }, [pendingBulkPatients, filtered, selectedIds, bulkQuantity, bulkCancelled, clearSelection, printerService]);
 
   const allPageSelected = paginated.length > 0 && paginated.every((a) => selectedIds.has(a.appointment_id));
   const someSelected = selectedIds.size > 0;
@@ -320,7 +390,7 @@ function AppointmentsPageInner() {
                       appointment={appt}
                       isSelected={isSelected(appt.appointment_id)}
                       onToggleSelect={() => toggleSelect(appt.appointment_id)}
-                      onPrint={() => setPrintTarget(appt)}
+                      onPrint={() => handlePrintClick(appt)}
                       searchQuery={searchQuery}
                     />
                   ))}
@@ -363,13 +433,13 @@ function AppointmentsPageInner() {
           isPrinting={isPrinting}
         />
       )}
-      {showBulkModal && (
+      {showBulkModal && pendingBulkPatients && (
         <BulkPrintModal
-          appointments={filtered.filter((a) => selectedIds.has(a.appointment_id))}
+          appointments={pendingBulkPatients}
           quantity={bulkQuantity}
           onQuantityChange={setBulkQuantity}
           onConfirm={handleBulkPrint}
-          onClose={() => !isPrinting && setShowBulkModal(false)}
+          onClose={() => { if (!isPrinting) { setShowBulkModal(false); setPendingBulkPatients(null); } }}
           onCancel={() => setBulkCancelled(true)}
           isPrinting={isPrinting}
           progress={bulkProgress}
@@ -382,11 +452,23 @@ function AppointmentsPageInner() {
         selectedCount={selectedIds.size}
         quantity={bulkQuantity}
         onQuantityChange={setBulkQuantity}
-        onPrint={() => setShowBulkModal(true)}
+        onPrint={handleBulkPrintTrigger}
         onClear={clearSelection}
         onSelectAll={selectAll}
         totalVisible={filtered.length}
       />
+
+      {/* Auto-fetch loading overlay */}
+      {isAutoFetching && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-xl px-5 py-3 flex items-center gap-3 shadow-lg border border-slate-200 dark:border-slate-800">
+            <Loader2 size={16} className="animate-spin text-indigo-600 shrink-0" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Looking up patient info…
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
