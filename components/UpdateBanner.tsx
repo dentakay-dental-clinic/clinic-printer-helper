@@ -106,6 +106,15 @@ export default function UpdateBanner() {
           )}
         </div>
 
+        {(state.phase === "error") && (
+          <button
+            onClick={() => setDismissed(true)}
+            className="h-6 w-6 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+          >
+            <X size={12} />
+          </button>
+        )}
+
         {state.phase === "available" && (
           <div className="flex items-center gap-1 shrink-0">
             <button

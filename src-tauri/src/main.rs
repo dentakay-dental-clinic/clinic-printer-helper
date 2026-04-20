@@ -478,50 +478,59 @@ mod macos_print {
 #[cfg(target_os = "macos")]
 fn enumerate_printers() -> Vec<String> {
     use std::process::Command;
-    match Command::new("lpstat").arg("-p").output() {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            // Lines look like: "printer PrinterName is ..."
-            stdout
-                .lines()
-                .filter_map(|line| {
-                    if line.starts_with("printer ") {
-                        line.split_whitespace().nth(1).map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
-        Err(_) => vec![],
-    }
+    // Force C locale so output is always English regardless of system language.
+    // Without this, Turkish macOS outputs "yazıcı" instead of "printer".
+    // Also try `lpstat -a` as fallback which lists all accepting queues.
+    let try_lpstat = |arg: &str| -> Vec<String> {
+        Command::new("lpstat")
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
+            .arg(arg)
+            .output()
+            .ok()
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|line| {
+                        // `lpstat -p`: "printer NAME is ..."
+                        // `lpstat -a`: "NAME accepting requests since ..."
+                        let first = line.split_whitespace().next()?;
+                        if arg == "-p" && first != "printer" { return None; }
+                        let name = if arg == "-p" {
+                            line.split_whitespace().nth(1)?.to_string()
+                        } else {
+                            first.to_string()
+                        };
+                        Some(name)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let printers = try_lpstat("-p");
+    if !printers.is_empty() { printers } else { try_lpstat("-a") }
 }
 
-// ── Windows raw-printer helpers (used only for test_printer / list_printers) ──
+// ── Windows printer enumeration via PowerShell ────────────────────────────────
+// PowerShell Get-Printer finds local, network, and connected printers reliably.
 
 #[cfg(windows)]
 fn enumerate_printers() -> Vec<String> {
-    use std::ffi::CStr;
-    use std::ptr;
-    use winapi::shared::minwindef::DWORD;
-    use winapi::um::winspool::{
-        EnumPrintersA, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_2A,
-    };
-    unsafe {
-        let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
-        let mut needed: DWORD = 0;
-        let mut returned: DWORD = 0;
-        EnumPrintersA(flags, ptr::null_mut(), 2, ptr::null_mut(), 0, &mut needed, &mut returned);
-        if needed == 0 { return vec![]; }
-        let mut buf = vec![0u8; needed as usize];
-        if EnumPrintersA(flags, ptr::null_mut(), 2, buf.as_mut_ptr(), needed, &mut needed, &mut returned) == 0 {
-            return vec![];
+    use std::process::Command;
+    match Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command",
+               "Get-Printer | Select-Object -ExpandProperty Name"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
         }
-        let printers = std::slice::from_raw_parts(buf.as_ptr() as *const PRINTER_INFO_2A, returned as usize);
-        printers.iter().filter_map(|p| {
-            if p.pPrinterName.is_null() { return None; }
-            CStr::from_ptr(p.pPrinterName).to_str().ok().map(|s| s.to_string())
-        }).collect()
+        _ => vec![],
     }
 }
 

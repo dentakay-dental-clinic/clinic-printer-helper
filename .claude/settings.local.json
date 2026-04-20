@@ -25,7 +25,21 @@
       "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check 2>&1\")",
       "Bash(\"C:/Users/Jean.Galant/.cargo/bin/cargo.exe\" check *)",
       "Bash(git add:*)",
-      "Bash(git rebase:*)"
+      "Bash(git rebase:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(curl -s \"https://api.github.com/repos/dentakay-dental-clinic/clinic-printer-helper/releases\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(npx @tauri-apps/cli signer generate -w ~/.tauri/clinic.key)",
+      "Bash(curl -sL \"https://api.github.com/repos/dentakay-dental-clinic/clinic-printer-helper/releases/latest\")",
+      "Bash(python3 -c \":*)",
+      "Bash(sed -i '' 's/\"\"version\"\": \"\"0.3.1\"\"/\"\"version\"\": \"\"0.3.2\"\"/' src-tauri/tauri.conf.json package.json)",
+      "Bash(sed -i '' 's/^version = \"\"0.3.1\"\"/version = \"\"0.3.2\"\"/' src-tauri/Cargo.toml)",
+      "Bash(curl -s \"https://api.github.com/repos/dentakay-dental-clinic/clinic-printer-helper/releases/latest\")",
+      "Bash(sed -i '' 's/\"\"version\"\": \"\"0.3.2\"\"/\"\"version\"\": \"\"0.3.3\"\"/' src-tauri/tauri.conf.json package.json)",
+      "Bash(sed -i '' 's/^version = \"\"0.3.2\"\"/version = \"\"0.3.3\"\"/' src-tauri/Cargo.toml)"
     ]
   }
 }

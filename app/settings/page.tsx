@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date" | "error">("idle");
+  const [confirmReset, setConfirmReset] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -120,7 +121,7 @@ export default function SettingsPage() {
   }
 
   function handleReset() {
-    if (!confirm("Reset all clinic configuration? The app will return to setup.")) return;
+    if (!confirmReset) { setConfirmReset(true); return; }
     configStore.remove(SESSION_UNLOCKED_KEY);
     clearConfig();
     router.replace("/setup");
@@ -304,13 +305,33 @@ export default function SettingsPage() {
         {/* Danger zone */}
         <div className="mt-4 bg-white dark:bg-slate-900 rounded-2xl border border-red-100 dark:border-red-900/30 p-4">
           <p className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">Danger zone</p>
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:underline"
-          >
-            <Trash2 size={14} />
-            Reset clinic configuration
-          </button>
+          {!confirmReset ? (
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:underline"
+            >
+              <Trash2 size={14} />
+              Reset clinic configuration
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-red-600 dark:text-red-400">Are you sure? This will clear all settings.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleReset}
+                  className="px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  Yes, reset
+                </button>
+                <button
+                  onClick={() => setConfirmReset(false)}
+                  className="px-3 py-1.5 text-xs font-semibold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
