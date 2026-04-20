@@ -6,7 +6,7 @@ on:
       - "v*"
 
 jobs:
-  publish-tauri:
+  publish-macos:
     runs-on: macos-14
     permissions:
       contents: write
@@ -27,12 +27,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and publish Tauri app
+      - name: Build and publish macOS app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Clinic Print Helper ${{ github.ref_name }}"
@@ -40,5 +42,41 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
+          updaterJsonPreferNsis: false
+          includeUpdaterJson: true
+
+  publish-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish Windows app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Clinic Print Helper ${{ github.ref_name }}"
+          releaseBody: "See the assets to download and install this version."
+          releaseDraft: false
+          prerelease: false
           updaterJsonPreferNsis: false
           includeUpdaterJson: true
