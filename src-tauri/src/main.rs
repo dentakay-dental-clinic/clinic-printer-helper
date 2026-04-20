@@ -323,7 +323,7 @@ mod macos_print {
     // Physical label dimensions — must match the roll installed in the printer
     const W: f32 = 57.0;   // mm wide
     const H: f32 = 27.0;   // mm tall (feed direction)
-    const HDR_H: f32 = 6.5; // mm — dark header band height
+    const HDR_H: f32 = 7.0; // mm — dark header band height
 
     pub fn print(
         printer_name: &str,
@@ -443,17 +443,17 @@ mod macos_print {
         layer.set_fill_color(Color::Rgb(Rgb::new(1.0, 1.0, 1.0, None)));
         layer.use_text(
             "DENTAKAY DENTAL CLINIC",
-            7.0_f32,
-            Mm(3.0),
-            Mm(hdr_bottom + 1.5),
+            9.5_f32,
+            Mm(2.5),
+            Mm(hdr_bottom + 1.8),
             font,
         );
 
         // ── Body fields ──────────────────────────────────────────────────────
         layer.set_fill_color(Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)));
-        let x: f32 = 2.5;
-        let font_sz: f32 = 6.5;
-        let line_h: f32 = 4.0;
+        let x: f32 = 2.0;
+        let font_sz: f32 = 8.5;
+        let line_h: f32 = 4.5;
         let y0: f32 = hdr_bottom - 4.2;
 
         layer.use_text(&format!("Ad Soyadı: {}", name),           font_sz, Mm(x), Mm(y0),                   font);
