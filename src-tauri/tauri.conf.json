@@ -27,7 +27,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2MzA4NTdENUE5MjJGOTAKUldTUUw1SmFmWVV3Tmp4U2FDRk13SVJyMlRVV1JtOFdDT1J6OVQyaWQzV3M4VkNWSEsrQk5JWmsK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNGNEY1RkRERjVGMUE1OTIKUldTU3BmSDEzVjlQUDhTdjRiWHdXMmwraHA2a01hYmVKNWxDMllSd2Y2WGJBY29IMy90VDVjMkQK",
       "endpoints": [
         "https://github.com/dentakay-dental-clinic/clinic-printer-helper/releases/latest/download/latest.json"
       ]
