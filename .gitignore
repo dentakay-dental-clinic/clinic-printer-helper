@@ -42,3 +42,4 @@ next-env.d.ts
 
 # Rust build artifacts
 src-tauri/target/
+env.local
