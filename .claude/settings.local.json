@@ -49,7 +49,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:v2.tauri.app)",
       "WebFetch(domain:tauri.app)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''version'''']\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''version'''']\\)\")",
+      "Bash(sed -i '' 's/\"\"version\"\": \"\"0.3.4\"\"/\"\"version\"\": \"\"0.3.5\"\"/' src-tauri/tauri.conf.json package.json)",
+      "Bash(sed -i '' 's/^version = \"\"0.3.4\"\"/version = \"\"0.3.5\"\"/' src-tauri/Cargo.toml)"
     ]
   }
 }
