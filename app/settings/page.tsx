@@ -27,7 +27,8 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
-  const [updateState, setUpdateState] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date" | "error">("idle");
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
@@ -81,14 +82,16 @@ export default function SettingsPage() {
   async function handleCheckUpdate() {
     setUpdateState("checking");
     setUpdateVersion(null);
+    setUpdateError(null);
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
       if (!update?.available) { setUpdateState("up-to-date"); return; }
       setUpdateVersion(update.version);
       setUpdateState("available");
-    } catch {
-      setUpdateState("idle");
+    } catch (e) {
+      setUpdateError(String(e));
+      setUpdateState("error");
     }
   }
 
@@ -246,7 +249,7 @@ export default function SettingsPage() {
                 <p className="text-xs text-slate-400">v{require("../../package.json").version}</p>
               </div>
 
-              {updateState === "idle" || updateState === "up-to-date" ? (
+              {updateState === "idle" || updateState === "up-to-date" || updateState === "error" ? (
                 <button
                   type="button"
                   onClick={handleCheckUpdate}
@@ -275,6 +278,12 @@ export default function SettingsPage() {
             {updateState === "up-to-date" && (
               <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                 <CheckCircle size={12} /> Already on the latest version.
+              </p>
+            )}
+
+            {updateState === "error" && updateError && (
+              <p className="text-xs text-red-600 dark:text-red-400 break-all font-mono bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
+                {updateError}
               </p>
             )}
 

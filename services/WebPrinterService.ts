@@ -47,8 +47,23 @@ export class WebPrinterService implements IPrinterService {
 
     window.print();
 
-    // Clean up after dialog closes (synchronous in most browsers)
-    printArea.innerHTML = "";
+    // Clean up AFTER the print dialog closes, not before.
+    // On macOS (and Tauri WebView) window.print() is non-blocking —
+    // the dialog opens asynchronously, so we must wait for afterprint
+    // before clearing the DOM or the content won't be there to print.
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        printArea.innerHTML = "";
+        resolve();
+      };
+      window.addEventListener("afterprint", finish, { once: true });
+      // Fallback: clean up after 60 s if afterprint never fires
+      // (e.g. user cancels the dialog on some platforms)
+      setTimeout(finish, 60_000);
+    });
 
     return {
       success: true,

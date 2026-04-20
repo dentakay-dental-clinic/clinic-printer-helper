@@ -8,7 +8,8 @@ type State =
   | { phase: "idle" }
   | { phase: "available"; version: string }
   | { phase: "downloading"; progress: number }
-  | { phase: "ready" };
+  | { phase: "ready" }
+  | { phase: "error"; message: string };
 
 export default function UpdateBanner() {
   const [state, setState] = useState<State>({ phase: "idle" });
@@ -21,7 +22,9 @@ export default function UpdateBanner() {
         const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check();
         if (update?.available) setState({ phase: "available", version: update.version });
-      } catch {}
+      } catch (e) {
+        setState({ phase: "error", message: String(e) });
+      }
     }, 3000);
     return () => clearTimeout(t);
   }, []);
@@ -52,8 +55,8 @@ export default function UpdateBanner() {
       });
 
       await relaunch();
-    } catch {
-      setState({ phase: "idle" });
+    } catch (e) {
+      setState({ phase: "error", message: String(e) });
     }
   }, []);
 
@@ -94,6 +97,11 @@ export default function UpdateBanner() {
           {state.phase === "ready" && (
             <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 leading-tight">
               Done — relaunching…
+            </p>
+          )}
+          {state.phase === "error" && (
+            <p className="text-xs font-semibold text-red-600 dark:text-red-400 leading-tight break-all">
+              Update check failed: {state.message}
             </p>
           )}
         </div>
