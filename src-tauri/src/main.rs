@@ -305,6 +305,30 @@ mod gdi_print {
     }
 }
 
+// ── macOS printer enumeration via lpstat ──────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn enumerate_printers() -> Vec<String> {
+    use std::process::Command;
+    match Command::new("lpstat").arg("-p").output() {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            // Lines look like: "printer PrinterName is ..."
+            stdout
+                .lines()
+                .filter_map(|line| {
+                    if line.starts_with("printer ") {
+                        line.split_whitespace().nth(1).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        Err(_) => vec![],
+    }
+}
+
 // ── Windows raw-printer helpers (used only for test_printer / list_printers) ──
 
 #[cfg(windows)]
@@ -376,14 +400,29 @@ fn test_printer(printer_name: String) -> String {
         unsafe { ClosePrinter(h) };
         format!("✅ '{}' found and opened successfully. Ready to print.", printer_name)
     }
-    #[cfg(not(windows))]
-    { let _ = printer_name; "ℹ️ Not on Windows.".to_string() }
+    #[cfg(target_os = "macos")]
+    {
+        let all = enumerate_printers();
+        if all.contains(&printer_name) {
+            format!("✅ '{}' found. Ready to print.", printer_name)
+        } else {
+            format!(
+                "❌ '{}' not found.\nInstalled printers:\n{}",
+                printer_name,
+                if all.is_empty() { "  (none)".to_string() }
+                else { all.iter().map(|p| format!("  • {}", p)).collect::<Vec<_>>().join("\n") }
+            )
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    { let _ = printer_name; "ℹ️ Printer test not supported on this OS.".to_string() }
 }
 
 #[tauri::command]
 fn list_printers() -> Vec<String> {
     #[cfg(windows)] { enumerate_printers() }
-    #[cfg(not(windows))] { vec![] }
+    #[cfg(target_os = "macos")] { enumerate_printers() }
+    #[cfg(not(any(windows, target_os = "macos")))] { vec![] }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

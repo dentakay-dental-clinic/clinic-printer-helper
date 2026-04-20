@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   publish-tauri:
     permissions:
@@ -15,11 +18,11 @@ jobs:
       matrix:
         include:
           - platform: macos-14
-            args: --target universal-apple-darwin
+            args: --target universal-apple-darwin --bundles dmg,app
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
 
           - platform: windows-latest
-            args: --target x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc --bundles nsis
             rust-targets: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}

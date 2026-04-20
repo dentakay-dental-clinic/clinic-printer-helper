@@ -143,7 +143,7 @@ export default function SetupPage() {
           {/* Printer selector — only meaningful inside Tauri */}
           <Field
             label="Argox Printer"
-            hint="Select the Argox printer from Windows. Must match exactly the name in Devices and Printers."
+            hint="Select the Argox printer installed on this computer."
           >
             {printerList.length > 0 ? (
               <select

@@ -155,7 +155,7 @@ export default function SettingsPage() {
             <input type="number" min={1} max={99} value={form.default_quantity} onChange={(e) => update("default_quantity", e.target.value)} className={inputClass} />
           </Field>
 
-          <Field label="Argox Printer" hint="Select the label printer from Windows">
+          <Field label="Argox Printer" hint="Select the label printer installed on this computer">
             {printerList.length > 0 ? (
               <select
                 value={form.printer_name}
