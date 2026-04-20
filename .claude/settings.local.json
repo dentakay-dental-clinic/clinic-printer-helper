@@ -23,7 +23,9 @@
       "Bash(find \"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\" -name \".env*\" -exec cat {} \\\\;)",
       "Bash(npm run *)",
       "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check 2>&1\")",
-      "Bash(\"C:/Users/Jean.Galant/.cargo/bin/cargo.exe\" check *)"
+      "Bash(\"C:/Users/Jean.Galant/.cargo/bin/cargo.exe\" check *)",
+      "Bash(git add:*)",
+      "Bash(git rebase:*)"
     ]
   }
 }
