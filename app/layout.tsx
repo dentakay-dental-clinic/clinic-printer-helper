@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ClinicConfigProvider } from "@/contexts/ClinicConfigContext";
+import UpdateBanner from "@/components/UpdateBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,6 +29,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100`}
       >
+        <UpdateBanner />
         <ClinicConfigProvider>{children}</ClinicConfigProvider>
         {/* Hidden print area — populated by WebPrinterService before window.print() */}
         <div id="print-area" />

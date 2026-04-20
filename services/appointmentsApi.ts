@@ -36,16 +36,33 @@ export async function fetchAppointments(
       { params: queryParams }
     );
 
+    let rows: Appointment[];
     if (Array.isArray(result)) {
-      return result;
+      rows = result;
+    } else if (result && "data" in result && Array.isArray(result.data)) {
+      rows = result.data;
+    } else {
+      return [];
     }
-    if (result && "data" in result && Array.isArray(result.data)) {
-      return result.data;
-    }
-    return [];
+
+    // The API returns gender_code ("M"/"F") alongside each appointment but
+    // our Appointment type uses patient_gender ("ERKEK"/"KADIN").
+    // Map it here so the rest of the app never has to care about gender_code.
+    return rows.map((appt) => {
+      const raw = appt as Appointment & { gender_code?: string | null };
+      if (raw.patient_gender || !raw.gender_code) return appt;
+      return { ...appt, patient_gender: mapGenderCode(raw.gender_code) };
+    });
   } catch (err) {
     throw err;
   }
+}
+
+function mapGenderCode(code: string): string {
+  const c = code.toUpperCase();
+  if (c === "M" || c === "MALE" || c === "ERKEK") return "ERKEK";
+  if (c === "F" || c === "FEMALE" || c === "KADIN") return "KADIN";
+  return code;
 }
 
 /** Format a JS Date as DD-MM-YYYY for the API */

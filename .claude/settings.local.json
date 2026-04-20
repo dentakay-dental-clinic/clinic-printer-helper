@@ -20,7 +20,9 @@
       "Bash(powershell -Command \"& {$cargo = Join-Path $env:USERPROFILE ''.cargo\\\\bin\\\\cargo.exe''; & $cargo check --manifest-path ''C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml'' 2>&1}\")",
       "Bash(powershell.exe -NoProfile:*)",
       "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check --manifest-path C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml 2>&1\")",
-      "Bash(find \"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\" -name \".env*\" -exec cat {} \\\\;)"
+      "Bash(find \"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\" -name \".env*\" -exec cat {} \\\\;)",
+      "Bash(./node_modules/.bin/tauri signer:*)",
+      "Bash(npx @tauri-apps/cli signer generate -w ~/.tauri/clinic-printer.key)"
     ]
   }
 }
