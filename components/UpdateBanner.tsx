@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { isTauriApp } from "@/services/ArgoxPrinterService";
-import { Download, X } from "lucide-react";
+import { Download, X, RotateCcw } from "lucide-react";
 
 type State =
   | { phase: "idle" }
@@ -96,7 +96,7 @@ export default function UpdateBanner() {
           )}
           {state.phase === "ready" && (
             <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 leading-tight">
-              Done — relaunching…
+              Installed — restart the app to apply.
             </p>
           )}
           {state.phase === "error" && (
@@ -105,6 +105,19 @@ export default function UpdateBanner() {
             </p>
           )}
         </div>
+
+        {state.phase === "ready" && (
+          <button
+            onClick={async () => {
+              const { relaunch } = await import("@tauri-apps/plugin-process");
+              await relaunch();
+            }}
+            className="flex items-center gap-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-2.5 py-1.5 transition-colors shrink-0"
+          >
+            <RotateCcw size={11} />
+            Restart
+          </button>
+        )}
 
         {(state.phase === "error") && (
           <button

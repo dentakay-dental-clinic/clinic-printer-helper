@@ -379,20 +379,23 @@ mod macos_print {
         }
 
         // ── Save to temp file ────────────────────────────────────────────────
-        let tmp = format!(
-            "/tmp/clinic_{}.pdf",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
+        let tmp = std::env::temp_dir()
+            .join(format!("clinic_{}.pdf",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()))
+            .to_string_lossy()
+            .to_string();
         let file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
         doc.save(&mut BufWriter::new(file)).map_err(|e| e.to_string())?;
 
         // ── Send to printer via lpr ──────────────────────────────────────────
         // Try with explicit media size first; fall back to no media args
         // (some CUPS queues don't accept Custom.NxNmm media names).
-        let out1 = Command::new("lpr")
+        // Use absolute path — Tauri apps don't inherit the full shell PATH
+        let lpr = "/usr/bin/lpr";
+        let out1 = Command::new(lpr)
             .env("LANG", "C").env("LC_ALL", "C")
             .args([
                 "-P", printer_name,
@@ -406,7 +409,7 @@ mod macos_print {
             true
         } else {
             // Retry without media param
-            Command::new("lpr")
+            Command::new(lpr)
                 .env("LANG", "C").env("LC_ALL", "C")
                 .args(["-P", printer_name, &tmp])
                 .status()
@@ -507,7 +510,7 @@ fn enumerate_printers() -> Vec<String> {
     // Without this, Turkish macOS outputs "yazıcı" instead of "printer".
     // Also try `lpstat -a` as fallback which lists all accepting queues.
     let try_lpstat = |arg: &str| -> Vec<String> {
-        Command::new("lpstat")
+        Command::new("/usr/bin/lpstat")
             .env("LANG", "C")
             .env("LC_ALL", "C")
             .arg(arg)
