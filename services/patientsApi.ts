@@ -65,6 +65,45 @@ export function patientMSInfoToAppointment(info: PatientMSInfo): Appointment {
   };
 }
 
+/**
+ * Enriches a list of appointments with gender (and birth date) from the
+ * MedicaSimple patient info endpoint.
+ *
+ * - Runs all requests in parallel (Promise.allSettled) so one failure
+ *   doesn't block the rest.
+ * - Skips appointments that already have both fields.
+ * - Skips appointments with no patient_ak.
+ * - On any per-patient error, returns the original appointment unchanged.
+ */
+export async function enrichAppointmentsWithDemographics(
+  client: ApiClient,
+  appointments: Appointment[]
+): Promise<Appointment[]> {
+  const results = await Promise.allSettled(
+    appointments.map(async (appt): Promise<Appointment> => {
+      // Already have both — no need for an extra call
+      if (appt.patient_gender && appt.patient_birth_date) return appt;
+      if (!appt.patient_ak) return appt;
+
+      try {
+        const info = await fetchPatientByAk(client, appt.patient_ak);
+        if (!info) return appt;
+        return {
+          ...appt,
+          patient_gender: appt.patient_gender ?? mapGender(info.gender_name),
+          patient_birth_date: appt.patient_birth_date ?? info.birth_date,
+        };
+      } catch {
+        return appt;
+      }
+    })
+  );
+
+  return results.map((r, i) =>
+    r.status === "fulfilled" ? r.value : appointments[i]
+  );
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /** Ensures AK is in AK-XXXXXXX format. */

@@ -15,6 +15,7 @@ import {
   fetchAppointments,
   formatApiDate,
 } from "@/services/appointmentsApi";
+import { enrichAppointmentsWithDemographics } from "@/services/patientsApi";
 import { useClinicConfig } from "./ClinicConfigContext";
 
 type QuickFilter = "today" | "next1h" | "next2h" | "all" | "completed" | "in_treatment" | "arrived";
@@ -122,6 +123,7 @@ export function AppointmentsProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     fetchAppointments(client, params)
+      .then((data) => enrichAppointmentsWithDemographics(client, data))
       .then((data) => {
         setAppointments(data);
         setSelectedIds(new Set());
