@@ -390,27 +390,41 @@ mod macos_print {
         doc.save(&mut BufWriter::new(file)).map_err(|e| e.to_string())?;
 
         // ── Send to printer via lpr ──────────────────────────────────────────
-        // -o media=Custom.57x27mm tells CUPS the exact paper size.
-        // -o fit-to-page=false keeps the PDF at its native size.
-        let status = Command::new("lpr")
+        // Try with explicit media size first; fall back to no media args
+        // (some CUPS queues don't accept Custom.NxNmm media names).
+        let out1 = Command::new("lpr")
+            .env("LANG", "C").env("LC_ALL", "C")
             .args([
                 "-P", printer_name,
                 "-o", &format!("media=Custom.{}x{}mm", W as u32, H as u32),
-                "-o", "fit-to-page=false",
                 &tmp,
             ])
-            .status()
+            .output()
             .map_err(|e| format!("lpr failed: {}", e))?;
+
+        let success = if out1.status.success() {
+            true
+        } else {
+            // Retry without media param
+            Command::new("lpr")
+                .env("LANG", "C").env("LC_ALL", "C")
+                .args(["-P", printer_name, &tmp])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
 
         let _ = fs::remove_file(&tmp);
 
-        if status.success() {
+        if success {
             Ok(format!(
                 "Sent {} patient(s) × {} label(s) to '{}'.",
                 patients.len(), quantity, printer_name
             ))
         } else {
-            Err(format!("lpr returned an error for printer '{}'.", printer_name))
+            let stderr = String::from_utf8_lossy(&out1.stderr).to_string();
+            Err(format!("lpr error for '{}': {}", printer_name,
+                if stderr.is_empty() { "printer rejected job".to_string() } else { stderr }))
         }
     }
 
@@ -462,14 +476,25 @@ mod macos_print {
         layer.use_text(&format!("Ak Kodu: {}", ak),                font_sz, Mm(x), Mm(y0 - line_h * 3.0_f32), font);
     }
 
-    /// Try to load Arial from standard macOS locations (supports Turkish).
+    /// Load a system font that supports Turkish (ş ğ ı ü ç İ Ö etc.).
     fn load_font() -> Option<Vec<u8>> {
         let candidates = [
             "/System/Library/Fonts/Supplemental/Arial.ttf",
             "/Library/Fonts/Arial.ttf",
             "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+            "/System/Library/Fonts/Supplemental/Verdana.ttf",
+            "/System/Library/Fonts/Supplemental/Georgia.ttf",
+            // Fallback: any TTF in the supplemental folder
         ];
-        candidates.iter().find_map(|p| fs::read(p).ok())
+        if let Some(data) = candidates.iter().find_map(|p| fs::read(p).ok()) {
+            return Some(data);
+        }
+        // Last resort: scan /System/Library/Fonts/Supplemental/ for any .ttf
+        fs::read_dir("/System/Library/Fonts/Supplemental/")
+            .ok()?
+            .filter_map(|e| e.ok())
+            .find(|e| e.path().extension().and_then(|x| x.to_str()) == Some("ttf"))
+            .and_then(|e| fs::read(e.path()).ok())
     }
 }
 

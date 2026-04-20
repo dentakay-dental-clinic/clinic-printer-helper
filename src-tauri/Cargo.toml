@@ -1,6 +1,6 @@
 [package]
 name = "printer-helper"
-version = "0.3.3"
+version = "0.3.4"
 description = "Clinic Print Helper"
 authors = ["Clinic"]
 license = "MIT"
