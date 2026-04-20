@@ -12,7 +12,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { PrintModal } from "@/components/PrintModal";
 import { BulkPrintModal } from "@/components/BulkPrintModal";
 import { printerService as webPrinterService } from "@/services/WebPrinterService";
-import { ArgoxPrinterService, isTauriApp, isWindows } from "@/services/ArgoxPrinterService";
+import { ArgoxPrinterService, isTauriApp } from "@/services/ArgoxPrinterService";
 import { IPrinterService } from "@/services/PrinterService";
 import { printHistoryStore } from "@/store/PrintHistoryStore";
 import { PrintHistoryPanel } from "@/components/PrintHistoryPanel";
@@ -54,7 +54,7 @@ function AppointmentsPageInner() {
 
   // Use Argox native printing inside Tauri; fall back to window.print() in browser
   const printerService = useMemo<IPrinterService>(() => {
-    if (isTauriApp() && isWindows() && config?.printer_name) {
+    if (isTauriApp() && config?.printer_name) {
       return new ArgoxPrinterService(config.printer_name);
     }
     return webPrinterService;

@@ -305,6 +305,174 @@ mod gdi_print {
     }
 }
 
+// ── macOS native label printing via printpdf + lpr ───────────────────────────
+//
+// Generates a PDF at the exact label dimensions and sends it silently
+// to the named CUPS printer via `lpr`, matching the no-dialog experience
+// on Windows.  Turkish characters are supported by loading Arial.ttf from
+// the macOS system font directory.
+
+#[cfg(target_os = "macos")]
+mod macos_print {
+    use printpdf::*;
+    use printpdf::path::{PaintMode, WindingOrder};
+    use std::io::BufWriter;
+    use std::fs;
+    use std::process::Command;
+
+    // Physical label dimensions — must match the roll installed in the printer
+    const W: f32 = 57.0;   // mm wide
+    const H: f32 = 27.0;   // mm tall (feed direction)
+    const HDR_H: f32 = 6.5; // mm — dark header band height
+
+    pub fn print(
+        printer_name: &str,
+        patients: &[super::PatientLabel],
+        quantity: u32,
+    ) -> Result<String, String> {
+        if patients.is_empty() || quantity == 0 {
+            return Err("Nothing to print.".to_string());
+        }
+
+        let total = (patients.len() as u32) * quantity;
+
+        // ── Build PDF ────────────────────────────────────────────────────────
+        let (doc, first_page, first_layer) =
+            PdfDocument::new("Clinic Label", Mm(W), Mm(H), "Layer");
+
+        // Load Arial for Turkish character support; fall back to built-in
+        let font_data = load_font();
+        let font: IndirectFontRef = match font_data {
+            Some(ref bytes) => doc
+                .add_external_font(bytes.as_slice())
+                .unwrap_or_else(|_| doc.add_builtin_font(BuiltinFont::HelveticaBold).unwrap()),
+            None => doc.add_builtin_font(BuiltinFont::HelveticaBold).unwrap(),
+        };
+
+        // Collect all pages: first one is created by PdfDocument::new
+        let mut pages: Vec<(PdfPageIndex, PdfLayerIndex)> = vec![(first_page, first_layer)];
+        for _ in 1..total {
+            let (p, l) = doc.add_page(Mm(W), Mm(H), "Layer");
+            pages.push((p, l));
+        }
+
+        let mut idx = 0usize;
+        for p in patients {
+            let name = p.patient_name.as_deref().unwrap_or("-");
+            let birth = p.patient_birth_date.as_deref().unwrap_or("-");
+            let gender = match p.patient_gender.as_deref()
+                .map(|s| s.to_uppercase())
+                .as_deref()
+            {
+                Some("ERKEK") | Some("E") | Some("M") | Some("MALE") => "Erkek",
+                Some("KADIN") | Some("K") | Some("F") | Some("FEMALE") => "Kadın",
+                _ => "-",
+            };
+            let ak = p.patient_ak.as_deref().unwrap_or("-");
+
+            for _ in 0..quantity {
+                let (pg, ly) = pages[idx];
+                let layer = doc.get_page(pg).get_layer(ly);
+                draw_label(&layer, &font, name, birth, gender, ak);
+                idx += 1;
+            }
+        }
+
+        // ── Save to temp file ────────────────────────────────────────────────
+        let tmp = format!(
+            "/tmp/clinic_{}.pdf",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+        let file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        doc.save(&mut BufWriter::new(file)).map_err(|e| e.to_string())?;
+
+        // ── Send to printer via lpr ──────────────────────────────────────────
+        // -o media=Custom.57x27mm tells CUPS the exact paper size.
+        // -o fit-to-page=false keeps the PDF at its native size.
+        let status = Command::new("lpr")
+            .args([
+                "-P", printer_name,
+                "-o", &format!("media=Custom.{}x{}mm", W as u32, H as u32),
+                "-o", "fit-to-page=false",
+                &tmp,
+            ])
+            .status()
+            .map_err(|e| format!("lpr failed: {}", e))?;
+
+        let _ = fs::remove_file(&tmp);
+
+        if status.success() {
+            Ok(format!(
+                "Sent {} patient(s) × {} label(s) to '{}'.",
+                patients.len(), quantity, printer_name
+            ))
+        } else {
+            Err(format!("lpr returned an error for printer '{}'.", printer_name))
+        }
+    }
+
+    fn draw_label(
+        layer: &PdfLayerReference,
+        font: &IndirectFontRef,
+        name: &str,
+        birth: &str,
+        gender: &str,
+        ak: &str,
+    ) {
+        // ── Dark header rectangle (top of label) ─────────────────────────────
+        // PDF Y-axis: 0 = bottom, H = top
+        let hdr_bottom = H - HDR_H;
+
+        layer.set_fill_color(Color::Rgb(Rgb::new(0.118, 0.161, 0.231, None)));
+        // In printpdf 0.7 use Polygon (with PaintMode::Fill) for filled shapes
+        layer.add_polygon(Polygon {
+            rings: vec![vec![
+                (Point::new(Mm(0.0), Mm(hdr_bottom)), false),
+                (Point::new(Mm(W),   Mm(hdr_bottom)), false),
+                (Point::new(Mm(W),   Mm(H)),          false),
+                (Point::new(Mm(0.0), Mm(H)),          false),
+            ]],
+            mode: PaintMode::Fill,
+            winding_order: WindingOrder::NonZero,
+        });
+
+        // Header text — white
+        layer.set_fill_color(Color::Rgb(Rgb::new(1.0, 1.0, 1.0, None)));
+        layer.use_text(
+            "DENTAKAY DENTAL CLINIC",
+            7.0_f32,
+            Mm(3.0),
+            Mm(hdr_bottom + 1.5),
+            font,
+        );
+
+        // ── Body fields ──────────────────────────────────────────────────────
+        layer.set_fill_color(Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)));
+        let x: f32 = 2.5;
+        let font_sz: f32 = 6.5;
+        let line_h: f32 = 4.0;
+        let y0: f32 = hdr_bottom - 4.2;
+
+        layer.use_text(&format!("Ad Soyadı: {}", name),           font_sz, Mm(x), Mm(y0),                   font);
+        layer.use_text(&format!("Doğum Tarihi: {}", birth),        font_sz, Mm(x), Mm(y0 - line_h),         font);
+        layer.use_text(&format!("Cinsiyet: {}", gender),           font_sz, Mm(x), Mm(y0 - line_h * 2.0_f32), font);
+        layer.use_text(&format!("Ak Kodu: {}", ak),                font_sz, Mm(x), Mm(y0 - line_h * 3.0_f32), font);
+    }
+
+    /// Try to load Arial from standard macOS locations (supports Turkish).
+    fn load_font() -> Option<Vec<u8>> {
+        let candidates = [
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+        ];
+        candidates.iter().find_map(|p| fs::read(p).ok())
+    }
+}
+
 // ── macOS printer enumeration via lpstat ──────────────────────────────────────
 
 #[cfg(target_os = "macos")]
@@ -367,8 +535,10 @@ fn print_labels(
 ) -> Result<String, String> {
     #[cfg(windows)]
     { gdi_print::print(&printer_name, &patients, quantity) }
-    #[cfg(not(windows))]
-    { let _ = (printer_name, patients, quantity); Err("Only supported on Windows.".to_string()) }
+    #[cfg(target_os = "macos")]
+    { macos_print::print(&printer_name, &patients, quantity) }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    { let _ = (printer_name, patients, quantity); Err("Only supported on Windows and macOS.".to_string()) }
 }
 
 #[tauri::command]
