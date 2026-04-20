@@ -391,6 +391,8 @@ fn list_printers() -> Vec<String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![print_labels, list_printers, test_printer])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

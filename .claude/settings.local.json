@@ -21,7 +21,9 @@
       "Bash(powershell.exe -NoProfile:*)",
       "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check --manifest-path C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\\\\src-tauri\\\\Cargo.toml 2>&1\")",
       "Bash(find \"C:\\\\Users\\\\Jean.Galant\\\\Desktop\\\\printer-helper\" -name \".env*\" -exec cat {} \\\\;)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(cmd /c \"C:\\\\Users\\\\Jean.Galant\\\\.cargo\\\\bin\\\\cargo.exe check 2>&1\")",
+      "Bash(\"C:/Users/Jean.Galant/.cargo/bin/cargo.exe\" check *)"
     ]
   }
 }

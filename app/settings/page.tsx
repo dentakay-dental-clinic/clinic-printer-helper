@@ -7,7 +7,7 @@ import { ClinicConfig } from "@/types/config";
 import { configStore, SESSION_UNLOCKED_KEY } from "@/store/ConfigStore";
 import { listPrinters, testPrinter, isTauriApp } from "@/services/ArgoxPrinterService";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Save, Trash2, FlaskConical } from "lucide-react";
+import { ArrowLeft, Save, Trash2, FlaskConical, RefreshCw, Download, CheckCircle } from "lucide-react";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -27,6 +27,9 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [updateState, setUpdateState] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date">("idle");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   useEffect(() => {
     if (config) {
@@ -73,6 +76,44 @@ export default function SettingsPage() {
     saveConfig(updated);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function handleCheckUpdate() {
+    setUpdateState("checking");
+    setUpdateVersion(null);
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (!update?.available) { setUpdateState("up-to-date"); return; }
+      setUpdateVersion(update.version);
+      setUpdateState("available");
+    } catch {
+      setUpdateState("idle");
+    }
+  }
+
+  async function handleInstallUpdate() {
+    setUpdateState("downloading");
+    setDownloadProgress(0);
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      const update = await check();
+      if (!update?.available) return;
+      let downloaded = 0;
+      let total = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await update.downloadAndInstall((event: any) => {
+        if (event.event === "Started") { total = event.data.contentLength ?? 0; }
+        else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          if (total > 0) setDownloadProgress(Math.round((downloaded / total) * 100));
+        }
+      });
+      await relaunch();
+    } catch {
+      setUpdateState("available");
+    }
   }
 
   function handleReset() {
@@ -195,6 +236,61 @@ export default function SettingsPage() {
             {saved ? "Saved!" : "Save Settings"}
           </button>
         </form>
+
+        {/* App updates — only shown inside Tauri */}
+        {isTauriApp() && (
+          <div className="mt-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">App updates</p>
+                <p className="text-xs text-slate-400">v{require("../../package.json").version}</p>
+              </div>
+
+              {updateState === "idle" || updateState === "up-to-date" ? (
+                <button
+                  type="button"
+                  onClick={handleCheckUpdate}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-400 transition-colors"
+                >
+                  <RefreshCw size={13} />
+                  Check for updates
+                </button>
+              ) : updateState === "checking" ? (
+                <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <RefreshCw size={13} className="animate-spin" />
+                  Checking…
+                </span>
+              ) : updateState === "available" ? (
+                <button
+                  type="button"
+                  onClick={handleInstallUpdate}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  <Download size={12} />
+                  Install v{updateVersion}
+                </button>
+              ) : null}
+            </div>
+
+            {updateState === "up-to-date" && (
+              <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle size={12} /> Already on the latest version.
+              </p>
+            )}
+
+            {updateState === "downloading" && (
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500">Downloading… {downloadProgress}%</p>
+                <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-600 rounded-full transition-all duration-200"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Danger zone */}
         <div className="mt-4 bg-white dark:bg-slate-900 rounded-2xl border border-red-100 dark:border-red-900/30 p-4">
