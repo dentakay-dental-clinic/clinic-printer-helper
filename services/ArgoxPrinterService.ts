@@ -62,3 +62,8 @@ export function isTauriApp(): boolean {
     return false;
   }
 }
+
+/** True when running on Windows (works inside Tauri and browser). */
+export function isWindows(): boolean {
+  return typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+}
