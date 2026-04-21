@@ -392,9 +392,24 @@ mod macos_print {
             .map_err(|e| format!("cannot save PDF: {}", e))?;
 
         // ── Send to printer ──────────────────────────────────────────────────
-        // Attempt 1: lpr with explicit media size
-        // Attempt 2: lpr without media (some queues reject Custom.NxNmm)
-        // Attempt 3: lp -d (alternative CUPS frontend, works on some M1 configs)
+        // Search common CUPS binary locations — /usr/bin may be absent on
+        // M1 Macs that haven't installed Xcode CLT; Homebrew installs to
+        // /opt/homebrew/bin (Apple Silicon) or /usr/local/bin (Intel).
+        let lpr_paths = [
+            "/usr/bin/lpr",
+            "/opt/homebrew/bin/lpr",
+            "/usr/local/bin/lpr",
+        ];
+        let lp_paths = [
+            "/usr/bin/lp",
+            "/opt/homebrew/bin/lp",
+            "/usr/local/bin/lp",
+        ];
+        let find_bin = |paths: &[&str]| paths.iter().find(|&&p| std::path::Path::new(p).exists()).copied();
+
+        let lpr = find_bin(&lpr_paths);
+        let lp  = find_bin(&lp_paths);
+
         let media_arg = format!("media=Custom.{}x{}mm", W as u32, H as u32);
 
         let try_cmd = |args: &[&str]| -> bool {
@@ -406,7 +421,9 @@ mod macos_print {
                 .unwrap_or(false)
         };
 
-        let out1 = Command::new("/usr/bin/lpr")
+        // Capture first attempt output for error reporting
+        let first_lpr = lpr.unwrap_or("/usr/bin/lpr");
+        let out1 = Command::new(first_lpr)
             .env("LANG", "C").env("LC_ALL", "C")
             .args(["-P", printer_name, "-o", &media_arg, &tmp])
             .output();
@@ -414,12 +431,13 @@ mod macos_print {
         let success = match &out1 {
             Ok(o) if o.status.success() => true,
             _ => {
-                // Attempt 2: lpr without media
-                if try_cmd(&["/usr/bin/lpr", "-P", printer_name, &tmp]) {
+                // Attempt 2: lpr without media option
+                let ok2 = lpr.map(|b| try_cmd(&[b, "-P", printer_name, &tmp])).unwrap_or(false);
+                if ok2 {
                     true
                 } else {
-                    // Attempt 3: lp -d
-                    try_cmd(&["/usr/bin/lp", "-d", printer_name, &tmp])
+                    // Attempt 3: lp -d (alternative CUPS frontend)
+                    lp.map(|b| try_cmd(&[b, "-d", printer_name, &tmp])).unwrap_or(false)
                 }
             }
         };
@@ -437,9 +455,15 @@ mod macos_print {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 [e, s].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("; ")
             }).unwrap_or_default();
-            Err(format!("Print failed for '{}': {}",
+            let hint = if lpr.is_none() && lp.is_none() {
+                " (CUPS not found — run: xcode-select --install)".to_string()
+            } else {
+                String::new()
+            };
+            Err(format!("Print failed for '{}': {}{}",
                 printer_name,
-                if detail.is_empty() { "all lpr/lp attempts rejected the job".to_string() } else { detail }))
+                if detail.is_empty() { "all lpr/lp attempts rejected the job".to_string() } else { detail },
+                hint))
         }
     }
 
