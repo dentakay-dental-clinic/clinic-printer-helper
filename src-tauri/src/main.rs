@@ -13,6 +13,14 @@ struct PatientLabel {
     patient_ak: Option<String>,
 }
 
+#[cfg(target_os = "macos")]
+fn clean_printer_name(name: &str) -> String {
+    name.trim()
+        .trim_end_matches(|c: char| matches!(c, ',' | ':' | ';'))
+        .trim()
+        .to_string()
+}
+
 // ── Windows GDI label printing ────────────────────────────────────────────────
 //
 // Uses the standard Windows GDI printing API instead of raw PPLA.
@@ -23,16 +31,14 @@ struct PatientLabel {
 #[cfg(windows)]
 mod gdi_print {
     use std::ffi::CString;
-    use std::os::windows::ffi::OsStrExt;
     use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
     use std::ptr;
     use winapi::shared::windef::{RECT, SIZE};
-    use winapi::um::wingdi::*;
     use winapi::um::wingdi::GetTextExtentPoint32W;
+    use winapi::um::wingdi::*;
+    use winapi::um::winspool::{ClosePrinter, DocumentPropertiesA, OpenPrinterA};
     use winapi::um::winuser::FillRect;
-    use winapi::um::winspool::{
-        ClosePrinter, DocumentPropertiesA, OpenPrinterA,
-    };
 
     // Label dimensions in tenths of a millimetre (DEVMODE units)
     // Physical label: 57 mm wide × 27 mm tall
@@ -58,9 +64,12 @@ mod gdi_print {
 
         // First call: get required buffer size
         let needed = DocumentPropertiesA(
-            ptr::null_mut(), h_printer,
+            ptr::null_mut(),
+            h_printer,
             name_c.as_ptr() as *mut _,
-            ptr::null_mut(), ptr::null_mut(), 0,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0,
         );
         if needed <= 0 {
             ClosePrinter(h_printer);
@@ -72,7 +81,8 @@ mod gdi_print {
 
         // Second call: fill with current defaults
         let ret = DocumentPropertiesA(
-            ptr::null_mut(), h_printer,
+            ptr::null_mut(),
+            h_printer,
             name_c.as_ptr() as *mut _,
             buf.as_mut_ptr() as *mut _,
             ptr::null_mut(),
@@ -80,7 +90,9 @@ mod gdi_print {
         );
         ClosePrinter(h_printer);
 
-        if ret < 0 { return None; }
+        if ret < 0 {
+            return None;
+        }
 
         // Patch the DEVMODE fields for custom paper size.
         // DEVMODEA layout (offsets into the struct):
@@ -112,15 +124,15 @@ mod gdi_print {
             *fields_ptr |= 0x0002 | 0x0004 | 0x0008; // DM_PAPERSIZE|DM_PAPERLENGTH|DM_PAPERWIDTH
 
             // dmOrientation = DMORIENT_PORTRAIT (1) — driver handles rotation
-            let orient_ptr       = buf.as_mut_ptr().add(44) as *mut i16;
-            let paper_size_ptr   = buf.as_mut_ptr().add(46) as *mut i16;
+            let orient_ptr = buf.as_mut_ptr().add(44) as *mut i16;
+            let paper_size_ptr = buf.as_mut_ptr().add(46) as *mut i16;
             let paper_length_ptr = buf.as_mut_ptr().add(48) as *mut i16;
-            let paper_width_ptr  = buf.as_mut_ptr().add(50) as *mut i16;
+            let paper_width_ptr = buf.as_mut_ptr().add(50) as *mut i16;
 
-            *orient_ptr       = 1i16;           // DMORIENT_PORTRAIT
-            *paper_size_ptr   = 256i16;         // DMPAPER_USER — custom size
+            *orient_ptr = 1i16; // DMORIENT_PORTRAIT
+            *paper_size_ptr = 256i16; // DMPAPER_USER — custom size
             *paper_length_ptr = LABEL_H_TENTHS; // 270 = 27 mm (feed direction)
-            *paper_width_ptr  = LABEL_W_TENTHS; // 570 = 57 mm (print head width)
+            *paper_width_ptr = LABEL_W_TENTHS; // 570 = 57 mm (print head width)
         }
 
         Some(buf)
@@ -133,8 +145,7 @@ mod gdi_print {
     ) -> Result<String, String> {
         unsafe {
             // ── Build DEVMODE with label dimensions ───────────────────────
-            let name_c =
-                CString::new(printer_name).map_err(|_| "Invalid printer name")?;
+            let name_c = CString::new(printer_name).map_err(|_| "Invalid printer name")?;
 
             let devmode_buf = build_devmode(&name_c);
             let devmode_ptr = devmode_buf
@@ -166,26 +177,31 @@ mod gdi_print {
             }
 
             // ── Page / font metrics ────────────────────────────────────────
-            let dpi_y   = GetDeviceCaps(hdc, LOGPIXELSY);
-            let page_w  = GetDeviceCaps(hdc, HORZRES);
+            let dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+            let page_w = GetDeviceCaps(hdc, HORZRES);
 
             // Font sizes in device units (negative = character height in points)
-            let sz_hdr  = -(dpi_y * 10 / 72);   // 10 pt  — header
-            let sz_body = -(dpi_y *  9 / 72);   // 9 pt  — body fields
-            let line_h  =  dpi_y * 11 / 72;     // 11 pt spacing between body lines
+            let sz_hdr = -(dpi_y * 10 / 72); // 10 pt  — header
+            let sz_body = -(dpi_y * 9 / 72); // 9 pt  — body fields
+            let line_h = dpi_y * 11 / 72; // 11 pt spacing between body lines
 
             let face = to_wide("Helvetica");
 
             // ── Print one page per patient × quantity ──────────────────────
             for p in patients {
-                let name   = p.patient_name.as_deref().unwrap_or("-");
-                let birth  = p.patient_birth_date.as_deref().unwrap_or("-");
-                let gender = match p.patient_gender.as_deref().map(|s| s.to_uppercase()).as_deref() {
-                    Some("MALE")   | Some("ERKEK") | Some("M") | Some("E") => "Erkek",
+                let name = p.patient_name.as_deref().unwrap_or("-");
+                let birth = p.patient_birth_date.as_deref().unwrap_or("-");
+                let gender = match p
+                    .patient_gender
+                    .as_deref()
+                    .map(|s| s.to_uppercase())
+                    .as_deref()
+                {
+                    Some("MALE") | Some("ERKEK") | Some("M") | Some("E") => "Erkek",
                     Some("FEMALE") | Some("KADIN") | Some("F") | Some("K") => "Kadın",
                     _ => "-",
                 };
-                let ak     = p.patient_ak.as_deref().unwrap_or("-");
+                let ak = p.patient_ak.as_deref().unwrap_or("-");
 
                 for _ in 0..quantity {
                     if StartPage(hdc) <= 0 {
@@ -195,18 +211,32 @@ mod gdi_print {
                     SetBkMode(hdc, TRANSPARENT as i32);
 
                     // ── Dark header band ───────────────────────────────────
-                    let hdr_h = -(sz_hdr) + 6;           // a bit taller than the font
+                    let hdr_h = -(sz_hdr) + 6; // a bit taller than the font
                     let brush = CreateSolidBrush(RGB(30, 41, 59));
-                    let hdr_rect = RECT { left: 0, top: 0, right: page_w, bottom: hdr_h };
+                    let hdr_rect = RECT {
+                        left: 0,
+                        top: 0,
+                        right: page_w,
+                        bottom: hdr_h,
+                    };
                     FillRect(hdc, &hdr_rect, brush);
                     DeleteObject(brush as *mut _);
 
                     // ── Header text (white, bold) ──────────────────────────
                     let hfont_hdr = CreateFontW(
-                        sz_hdr, 0, 0, 0, FW_BOLD as i32,
-                        0, 0, 0, DEFAULT_CHARSET as u32,
-                        OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
-                        DEFAULT_QUALITY as u32, (DEFAULT_PITCH | FF_SWISS) as u32,
+                        sz_hdr,
+                        0,
+                        0,
+                        0,
+                        FW_BOLD as i32,
+                        0,
+                        0,
+                        0,
+                        DEFAULT_CHARSET as u32,
+                        OUT_DEFAULT_PRECIS as u32,
+                        CLIP_DEFAULT_PRECIS as u32,
+                        DEFAULT_QUALITY as u32,
+                        (DEFAULT_PITCH | FF_SWISS) as u32,
                         face.as_ptr(),
                     );
                     SelectObject(hdc, hfont_hdr as *mut _);
@@ -217,16 +247,25 @@ mod gdi_print {
 
                     // ── Body fields (black, normal) ────────────────────────
                     let hfont_body = CreateFontW(
-                        sz_body, 0, 0, 0, FW_EXTRABOLD as i32,
-                        0, 0, 0, DEFAULT_CHARSET as u32,
-                        OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
-                        DEFAULT_QUALITY as u32, (DEFAULT_PITCH | FF_SWISS) as u32,
+                        sz_body,
+                        0,
+                        0,
+                        0,
+                        FW_EXTRABOLD as i32,
+                        0,
+                        0,
+                        0,
+                        DEFAULT_CHARSET as u32,
+                        OUT_DEFAULT_PRECIS as u32,
+                        CLIP_DEFAULT_PRECIS as u32,
+                        DEFAULT_QUALITY as u32,
+                        (DEFAULT_PITCH | FF_SWISS) as u32,
                         face.as_ptr(),
                     );
                     SelectObject(hdc, hfont_body as *mut _);
                     SetTextColor(hdc, RGB(0, 0, 0));
 
-                    let x  = 4i32;
+                    let x = 4i32;
                     let y0 = hdr_h + 4;
 
                     // ── Patient name — manual word-wrap with TextOutW ─────────
@@ -234,7 +273,7 @@ mod gdi_print {
                     // a phantom blank line after the text.
                     let max_w = page_w - x * 2;
                     let label_prefix = "Ad Soyadi: ";
-                    let full_name    = format!("{}{}", label_prefix, name);
+                    let full_name = format!("{}{}", label_prefix, name);
 
                     // Split into words, then greedily pack into lines
                     let words: Vec<&str> = full_name.split_whitespace().collect();
@@ -261,7 +300,9 @@ mod gdi_print {
                             current = candidate;
                         }
                     }
-                    if !current.is_empty() { lines.push(current); }
+                    if !current.is_empty() {
+                        lines.push(current);
+                    }
 
                     // Draw each wrapped line with the same line_h as other fields
                     let mut cur_y = y0;
@@ -281,12 +322,15 @@ mod gdi_print {
                     for (i, field) in rest.iter().enumerate() {
                         let wfield = to_wide(field);
                         TextOutW(
-                            hdc, x, after_name + i as i32 * line_h,
-                            wfield.as_ptr(), (wfield.len() - 1) as i32,
+                            hdc,
+                            x,
+                            after_name + i as i32 * line_h,
+                            wfield.as_ptr(),
+                            (wfield.len() - 1) as i32,
                         );
                     }
 
-                    DeleteObject(hfont_hdr  as *mut _);
+                    DeleteObject(hfont_hdr as *mut _);
                     DeleteObject(hfont_body as *mut _);
                     EndPage(hdc);
                 }
@@ -314,15 +358,15 @@ mod gdi_print {
 
 #[cfg(target_os = "macos")]
 mod macos_print {
-    use printpdf::*;
     use printpdf::path::{PaintMode, WindingOrder};
-    use std::io::BufWriter;
+    use printpdf::*;
     use std::fs;
+    use std::io::BufWriter;
     use std::process::Command;
 
     // Physical label dimensions — must match the roll installed in the printer
-    const W: f32 = 57.0;   // mm wide
-    const H: f32 = 27.0;   // mm tall (feed direction)
+    const W: f32 = 57.0; // mm wide
+    const H: f32 = 27.0; // mm tall (feed direction)
     const HDR_H: f32 = 7.0; // mm — dark header band height
 
     pub fn print(
@@ -330,6 +374,9 @@ mod macos_print {
         patients: &[super::PatientLabel],
         quantity: u32,
     ) -> Result<String, String> {
+        let printer_name = super::clean_printer_name(printer_name);
+        let printer_name = printer_name.as_str();
+
         if patients.is_empty() || quantity == 0 {
             return Err("Nothing to print.".to_string());
         }
@@ -360,7 +407,9 @@ mod macos_print {
         for p in patients {
             let name = p.patient_name.as_deref().unwrap_or("-");
             let birth = p.patient_birth_date.as_deref().unwrap_or("-");
-            let gender = match p.patient_gender.as_deref()
+            let gender = match p
+                .patient_gender
+                .as_deref()
                 .map(|s| s.to_uppercase())
                 .as_deref()
             {
@@ -400,19 +449,22 @@ mod macos_print {
             "/opt/homebrew/bin/lpr",
             "/usr/local/bin/lpr",
         ];
-        let lp_paths = [
-            "/usr/bin/lp",
-            "/opt/homebrew/bin/lp",
-            "/usr/local/bin/lp",
-        ];
-        let lpr = lpr_paths.iter().copied().find(|p| std::path::Path::new(p).exists());
-        let lp  = lp_paths.iter().copied().find(|p| std::path::Path::new(p).exists());
+        let lp_paths = ["/usr/bin/lp", "/opt/homebrew/bin/lp", "/usr/local/bin/lp"];
+        let lpr = lpr_paths
+            .iter()
+            .copied()
+            .find(|p| std::path::Path::new(p).exists());
+        let lp = lp_paths
+            .iter()
+            .copied()
+            .find(|p| std::path::Path::new(p).exists());
 
         let media_arg = format!("media=Custom.{}x{}mm", W as u32, H as u32);
 
         let try_cmd = |args: &[&str]| -> bool {
             Command::new(args[0])
-                .env("LANG", "C").env("LC_ALL", "C")
+                .env("LANG", "C")
+                .env("LC_ALL", "C")
                 .args(&args[1..])
                 .status()
                 .map(|s| s.success())
@@ -422,7 +474,8 @@ mod macos_print {
         // Capture first attempt output for error reporting
         let first_lpr = lpr.unwrap_or("/usr/bin/lpr");
         let out1 = Command::new(first_lpr)
-            .env("LANG", "C").env("LC_ALL", "C")
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
             .args(["-P", printer_name, "-o", &media_arg, &tmp])
             .output();
 
@@ -430,12 +483,15 @@ mod macos_print {
             Ok(o) if o.status.success() => true,
             _ => {
                 // Attempt 2: lpr without media option
-                let ok2 = lpr.map(|b| try_cmd(&[b, "-P", printer_name, &tmp])).unwrap_or(false);
+                let ok2 = lpr
+                    .map(|b| try_cmd(&[b, "-P", printer_name, &tmp]))
+                    .unwrap_or(false);
                 if ok2 {
                     true
                 } else {
                     // Attempt 3: lp -d (alternative CUPS frontend)
-                    lp.map(|b| try_cmd(&[b, "-d", printer_name, &tmp])).unwrap_or(false)
+                    lp.map(|b| try_cmd(&[b, "-d", printer_name, &tmp]))
+                        .unwrap_or(false)
                 }
             }
         };
@@ -445,23 +501,39 @@ mod macos_print {
         if success {
             Ok(format!(
                 "Sent {} patient(s) × {} label(s) to '{}'.",
-                patients.len(), quantity, printer_name
+                patients.len(),
+                quantity,
+                printer_name
             ))
         } else {
-            let detail = out1.ok().map(|o| {
-                let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                [e, s].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("; ")
-            }).unwrap_or_default();
+            let detail = out1
+                .ok()
+                .map(|o| {
+                    let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    [e, s]
+                        .iter()
+                        .filter(|x| !x.is_empty())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .unwrap_or_default();
             let hint = if lpr.is_none() && lp.is_none() {
                 " (CUPS not found — run: xcode-select --install)".to_string()
             } else {
                 String::new()
             };
-            Err(format!("Print failed for '{}': {}{}",
+            Err(format!(
+                "Print failed for '{}': {}{}",
                 printer_name,
-                if detail.is_empty() { "all lpr/lp attempts rejected the job".to_string() } else { detail },
-                hint))
+                if detail.is_empty() {
+                    "all lpr/lp attempts rejected the job".to_string()
+                } else {
+                    detail
+                },
+                hint
+            ))
         }
     }
 
@@ -482,9 +554,9 @@ mod macos_print {
         layer.add_polygon(Polygon {
             rings: vec![vec![
                 (Point::new(Mm(0.0), Mm(hdr_bottom)), false),
-                (Point::new(Mm(W),   Mm(hdr_bottom)), false),
-                (Point::new(Mm(W),   Mm(H)),          false),
-                (Point::new(Mm(0.0), Mm(H)),          false),
+                (Point::new(Mm(W), Mm(hdr_bottom)), false),
+                (Point::new(Mm(W), Mm(H)), false),
+                (Point::new(Mm(0.0), Mm(H)), false),
             ]],
             mode: PaintMode::Fill,
             winding_order: WindingOrder::NonZero,
@@ -507,10 +579,34 @@ mod macos_print {
         let line_h: f32 = 4.5;
         let y0: f32 = hdr_bottom - 4.2;
 
-        layer.use_text(&format!("Ad Soyadı: {}", name),           font_sz, Mm(x), Mm(y0),                   font);
-        layer.use_text(&format!("Doğum Tarihi: {}", birth),        font_sz, Mm(x), Mm(y0 - line_h),         font);
-        layer.use_text(&format!("Cinsiyet: {}", gender),           font_sz, Mm(x), Mm(y0 - line_h * 2.0_f32), font);
-        layer.use_text(&format!("Ak Kodu: {}", ak),                font_sz, Mm(x), Mm(y0 - line_h * 3.0_f32), font);
+        layer.use_text(
+            &format!("Ad Soyadı: {}", name),
+            font_sz,
+            Mm(x),
+            Mm(y0),
+            font,
+        );
+        layer.use_text(
+            &format!("Doğum Tarihi: {}", birth),
+            font_sz,
+            Mm(x),
+            Mm(y0 - line_h),
+            font,
+        );
+        layer.use_text(
+            &format!("Cinsiyet: {}", gender),
+            font_sz,
+            Mm(x),
+            Mm(y0 - line_h * 2.0_f32),
+            font,
+        );
+        layer.use_text(
+            &format!("Ak Kodu: {}", ak),
+            font_sz,
+            Mm(x),
+            Mm(y0 - line_h * 3.0_f32),
+            font,
+        );
     }
 
     /// Load a system font that supports Turkish (ş ğ ı ü ç İ Ö etc.).
@@ -557,13 +653,15 @@ fn enumerate_printers() -> Vec<String> {
                         // `lpstat -p`: "printer NAME is ..."
                         // `lpstat -a`: "NAME accepting requests since ..."
                         let first = line.split_whitespace().next()?;
-                        if arg == "-p" && first != "printer" { return None; }
+                        if arg == "-p" && first != "printer" {
+                            return None;
+                        }
                         let name = if arg == "-p" {
-                            line.split_whitespace().nth(1)?.to_string()
+                            clean_printer_name(line.split_whitespace().nth(1)?)
                         } else {
-                            first.to_string()
+                            clean_printer_name(first)
                         };
-                        Some(name)
+                        (!name.is_empty()).then_some(name)
                     })
                     .collect()
             })
@@ -571,7 +669,11 @@ fn enumerate_printers() -> Vec<String> {
     };
 
     let printers = try_lpstat("-p");
-    if !printers.is_empty() { printers } else { try_lpstat("-a") }
+    if !printers.is_empty() {
+        printers
+    } else {
+        try_lpstat("-a")
+    }
 }
 
 // ── Windows printer enumeration via PowerShell ────────────────────────────────
@@ -579,22 +681,24 @@ fn enumerate_printers() -> Vec<String> {
 
 #[cfg(windows)]
 fn enumerate_printers() -> Vec<String> {
-    use std::process::Command;
     use std::os::windows::process::CommandExt;
+    use std::process::Command;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     match Command::new("powershell")
         .creation_flags(CREATE_NO_WINDOW)
-        .args(["-NoProfile", "-NonInteractive", "-Command",
-               "Get-Printer | Select-Object -ExpandProperty Name"])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-Printer | Select-Object -ExpandProperty Name",
+        ])
         .output()
     {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
         _ => vec![],
     }
 }
@@ -608,11 +712,18 @@ fn print_labels(
     quantity: u32,
 ) -> Result<String, String> {
     #[cfg(windows)]
-    { gdi_print::print(&printer_name, &patients, quantity) }
+    {
+        gdi_print::print(&printer_name, &patients, quantity)
+    }
     #[cfg(target_os = "macos")]
-    { macos_print::print(&printer_name, &patients, quantity) }
+    {
+        macos_print::print(&printer_name, &patients, quantity)
+    }
     #[cfg(not(any(windows, target_os = "macos")))]
-    { let _ = (printer_name, patients, quantity); Err("Only supported on Windows and macOS.".to_string()) }
+    {
+        let _ = (printer_name, patients, quantity);
+        Err("Only supported on Windows and macOS.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -628,8 +739,14 @@ fn test_printer(printer_name: String) -> String {
             return format!(
                 "❌ '{}' not found.\nInstalled printers:\n{}",
                 printer_name,
-                if all.is_empty() { "  (none)".to_string() }
-                else { all.iter().map(|p| format!("  • {}", p)).collect::<Vec<_>>().join("\n") }
+                if all.is_empty() {
+                    "  (none)".to_string()
+                } else {
+                    all.iter()
+                        .map(|p| format!("  • {}", p))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
             );
         }
         let name_c = match CString::new(printer_name.clone()) {
@@ -639,13 +756,20 @@ fn test_printer(printer_name: String) -> String {
         let mut h = ptr::null_mut();
         let ok = unsafe { OpenPrinterA(name_c.as_ptr() as *mut _, &mut h, ptr::null_mut()) };
         if ok == 0 {
-            return format!("❌ Found '{}' but failed to open it. Is it offline?", printer_name);
+            return format!(
+                "❌ Found '{}' but failed to open it. Is it offline?",
+                printer_name
+            );
         }
         unsafe { ClosePrinter(h) };
-        format!("✅ '{}' found and opened successfully. Ready to print.", printer_name)
+        format!(
+            "✅ '{}' found and opened successfully. Ready to print.",
+            printer_name
+        )
     }
     #[cfg(target_os = "macos")]
     {
+        let printer_name = clean_printer_name(&printer_name);
         let all = enumerate_printers();
         if all.contains(&printer_name) {
             format!("✅ '{}' found. Ready to print.", printer_name)
@@ -653,20 +777,38 @@ fn test_printer(printer_name: String) -> String {
             format!(
                 "❌ '{}' not found.\nInstalled printers:\n{}",
                 printer_name,
-                if all.is_empty() { "  (none)".to_string() }
-                else { all.iter().map(|p| format!("  • {}", p)).collect::<Vec<_>>().join("\n") }
+                if all.is_empty() {
+                    "  (none)".to_string()
+                } else {
+                    all.iter()
+                        .map(|p| format!("  • {}", p))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
             )
         }
     }
     #[cfg(not(any(windows, target_os = "macos")))]
-    { let _ = printer_name; "ℹ️ Printer test not supported on this OS.".to_string() }
+    {
+        let _ = printer_name;
+        "ℹ️ Printer test not supported on this OS.".to_string()
+    }
 }
 
 #[tauri::command]
 fn list_printers() -> Vec<String> {
-    #[cfg(windows)] { enumerate_printers() }
-    #[cfg(target_os = "macos")] { enumerate_printers() }
-    #[cfg(not(any(windows, target_os = "macos")))] { vec![] }
+    #[cfg(windows)]
+    {
+        enumerate_printers()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        enumerate_printers()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        vec![]
+    }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -676,7 +818,11 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![print_labels, list_printers, test_printer])
+        .invoke_handler(tauri::generate_handler![
+            print_labels,
+            list_printers,
+            test_printer
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
