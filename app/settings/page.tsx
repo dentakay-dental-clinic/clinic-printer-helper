@@ -7,7 +7,8 @@ import { ClinicConfig } from "@/types/config";
 import { configStore, SESSION_UNLOCKED_KEY } from "@/store/ConfigStore";
 import { listPrinters, testPrinter, isTauriApp } from "@/services/ArgoxPrinterService";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Save, Trash2, FlaskConical, RefreshCw, Download, CheckCircle } from "lucide-react";
+import { ArrowLeft, Save, Trash2, FlaskConical, RefreshCw, Download, CheckCircle, DatabaseZap } from "lucide-react";
+import { clearPatientInfoCache, getPatientInfoCacheSize } from "@/store/PatientInfoCache";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -29,6 +30,8 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "available" | "downloading" | "up-to-date" | "error">("idle");
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmClearCache, setConfirmClearCache] = useState(false);
+  const [cacheSize, setCacheSize] = useState(() => getPatientInfoCacheSize());
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -303,8 +306,46 @@ export default function SettingsPage() {
         )}
 
         {/* Danger zone */}
-        <div className="mt-4 bg-white dark:bg-slate-900 rounded-2xl border border-red-100 dark:border-red-900/30 p-4">
-          <p className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">Danger zone</p>
+        <div className="mt-4 bg-white dark:bg-slate-900 rounded-2xl border border-red-100 dark:border-red-900/30 p-4 space-y-3">
+          <p className="text-sm font-semibold text-red-600 dark:text-red-400">Danger zone</p>
+
+          {/* Clear patient info cache */}
+          {!confirmClearCache ? (
+            <button
+              onClick={() => setConfirmClearCache(true)}
+              className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 hover:underline"
+            >
+              <DatabaseZap size={14} />
+              Clear patient info cache
+              {cacheSize > 0 && <span className="text-xs text-slate-400">({cacheSize} patients)</span>}
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-amber-600 dark:text-amber-400">
+                This will remove cached birth dates and genders for all {cacheSize} patients. The app will re-fetch them from the API on next print.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    clearPatientInfoCache();
+                    setCacheSize(0);
+                    setConfirmClearCache(false);
+                  }}
+                  className="px-3 py-1.5 text-xs font-semibold bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+                >
+                  Yes, clear cache
+                </button>
+                <button
+                  onClick={() => setConfirmClearCache(false)}
+                  className="px-3 py-1.5 text-xs font-semibold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reset config */}
           {!confirmReset ? (
             <button
               onClick={handleReset}

@@ -26,3 +26,11 @@ export function cachePatientInfo(ak: string, info: CachedPatientInfo) {
     localStorage.setItem(CACHE_KEY, JSON.stringify(data));
   } catch {}
 }
+
+export function clearPatientInfoCache() {
+  if (typeof window !== "undefined") localStorage.removeItem(CACHE_KEY);
+}
+
+export function getPatientInfoCacheSize(): number {
+  return Object.keys(load()).length;
+}

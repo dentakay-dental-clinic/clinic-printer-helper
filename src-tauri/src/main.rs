@@ -580,7 +580,10 @@ fn enumerate_printers() -> Vec<String> {
 #[cfg(windows)]
 fn enumerate_printers() -> Vec<String> {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     match Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-NonInteractive", "-Command",
                "Get-Printer | Select-Object -ExpandProperty Name"])
         .output()
