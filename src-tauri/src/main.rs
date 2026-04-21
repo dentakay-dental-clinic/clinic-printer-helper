@@ -405,10 +405,8 @@ mod macos_print {
             "/opt/homebrew/bin/lp",
             "/usr/local/bin/lp",
         ];
-        let find_bin = |paths: &[&str]| paths.iter().find(|&&p| std::path::Path::new(p).exists()).copied();
-
-        let lpr = find_bin(&lpr_paths);
-        let lp  = find_bin(&lp_paths);
+        let lpr = lpr_paths.iter().copied().find(|p| std::path::Path::new(p).exists());
+        let lp  = lp_paths.iter().copied().find(|p| std::path::Path::new(p).exists());
 
         let media_arg = format!("media=Custom.{}x{}mm", W as u32, H as u32);
 
