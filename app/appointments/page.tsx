@@ -52,13 +52,21 @@ function AppointmentsPageInner() {
     setTimeout(() => searchInputRef.current?.focus(), 50);
   }, []);
 
-  // Use Argox native printing inside Tauri; fall back to window.print() in browser
+  const labelWidthMm = config?.printer_settings?.label_width_mm;
+  const labelHeightMm = config?.printer_settings?.label_height_mm;
+  const labelTopOffsetMm = config?.printer_settings?.label_top_offset_mm;
+
+  // Use native printing inside Tauri; fall back to window.print() in browser
   const printerService = useMemo<IPrinterService>(() => {
     if (isTauriApp() && config?.printer_name) {
-      return new ArgoxPrinterService(config.printer_name);
+      return new ArgoxPrinterService(config.printer_name, {
+        label_width_mm: labelWidthMm,
+        label_height_mm: labelHeightMm,
+        label_top_offset_mm: labelTopOffsetMm,
+      });
     }
     return webPrinterService;
-  }, [config?.printer_name]);
+  }, [config?.printer_name, labelWidthMm, labelHeightMm, labelTopOffsetMm]);
 
   // Pagination
   const [page, setPage] = useState(1);

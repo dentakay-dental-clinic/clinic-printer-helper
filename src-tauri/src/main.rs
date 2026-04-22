@@ -13,6 +13,87 @@ struct PatientLabel {
     patient_ak: Option<String>,
 }
 
+const DEFAULT_LABEL_WIDTH_MM: f32 = 57.0;
+const DEFAULT_LABEL_HEIGHT_MM: f32 = 27.0;
+const DEFAULT_LABEL_TOP_OFFSET_MM: f32 = 0.0;
+const MIN_LABEL_MM: f32 = 10.0;
+const MAX_LABEL_MM: f32 = 200.0;
+const MIN_TOP_OFFSET_MM: f32 = -20.0;
+const MAX_TOP_OFFSET_MM: f32 = 20.0;
+
+#[derive(Clone, Copy)]
+struct LabelDimensions {
+    width_mm: f32,
+    height_mm: f32,
+    top_offset_mm: f32,
+}
+
+impl LabelDimensions {
+    fn from_options(
+        width_mm: Option<f32>,
+        height_mm: Option<f32>,
+        top_offset_mm: Option<f32>,
+    ) -> Self {
+        Self {
+            width_mm: clean_dimension(width_mm, DEFAULT_LABEL_WIDTH_MM),
+            height_mm: clean_dimension(height_mm, DEFAULT_LABEL_HEIGHT_MM),
+            top_offset_mm: clean_top_offset(top_offset_mm),
+        }
+    }
+
+    fn width_mm(self) -> f32 {
+        self.width_mm
+    }
+
+    fn height_mm(self) -> f32 {
+        self.height_mm
+    }
+
+    fn top_offset_mm(self) -> f32 {
+        self.top_offset_mm
+    }
+
+    fn width_tenths_mm(self) -> i16 {
+        (self.width_mm * 10.0).round() as i16
+    }
+
+    fn height_tenths_mm(self) -> i16 {
+        (self.height_mm * 10.0).round() as i16
+    }
+
+    #[cfg(target_os = "macos")]
+    fn media_arg(self) -> String {
+        format!(
+            "media=Custom.{}x{}mm",
+            format_mm(self.width_mm),
+            format_mm(self.height_mm)
+        )
+    }
+}
+
+fn clean_dimension(value: Option<f32>, default_value: f32) -> f32 {
+    match value {
+        Some(v) if v.is_finite() && (MIN_LABEL_MM..=MAX_LABEL_MM).contains(&v) => v,
+        _ => default_value,
+    }
+}
+
+fn clean_top_offset(value: Option<f32>) -> f32 {
+    match value {
+        Some(v) if v.is_finite() && (MIN_TOP_OFFSET_MM..=MAX_TOP_OFFSET_MM).contains(&v) => v,
+        _ => DEFAULT_LABEL_TOP_OFFSET_MM,
+    }
+}
+
+fn format_mm(value: f32) -> String {
+    let rounded = value.round();
+    if (value - rounded).abs() < 0.05 {
+        format!("{}", rounded as i32)
+    } else {
+        format!("{:.1}", value)
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn clean_printer_name(name: &str) -> String {
     name.trim()
@@ -40,11 +121,6 @@ mod gdi_print {
     use winapi::um::winspool::{ClosePrinter, DocumentPropertiesA, OpenPrinterA};
     use winapi::um::winuser::FillRect;
 
-    // Label dimensions in tenths of a millimetre (DEVMODE units)
-    // Physical label: 57 mm wide × 27 mm tall
-    const LABEL_W_TENTHS: i16 = 570; // 57 mm
-    const LABEL_H_TENTHS: i16 = 270; // 27 mm
-
     /// Convert a &str to a null-terminated UTF-16 Vec for W-suffix WinAPI calls.
     fn to_wide(s: &str) -> Vec<u16> {
         OsStr::new(s)
@@ -53,9 +129,12 @@ mod gdi_print {
             .collect()
     }
 
-    /// Build a DEVMODEA with paper size set to 57 × 27 mm.
+    /// Build a DEVMODEA with the selected custom paper size.
     /// Returns None if the printer cannot be opened or DocumentProperties fails.
-    unsafe fn build_devmode(name_c: &CString) -> Option<Vec<u8>> {
+    unsafe fn build_devmode(
+        name_c: &CString,
+        dimensions: super::LabelDimensions,
+    ) -> Option<Vec<u8>> {
         // Open printer handle
         let mut h_printer = ptr::null_mut();
         if OpenPrinterA(name_c.as_ptr() as *mut _, &mut h_printer, ptr::null_mut()) == 0 {
@@ -131,8 +210,8 @@ mod gdi_print {
 
             *orient_ptr = 1i16; // DMORIENT_PORTRAIT
             *paper_size_ptr = 256i16; // DMPAPER_USER — custom size
-            *paper_length_ptr = LABEL_H_TENTHS; // 270 = 27 mm (feed direction)
-            *paper_width_ptr = LABEL_W_TENTHS; // 570 = 57 mm (print head width)
+            *paper_length_ptr = dimensions.height_tenths_mm();
+            *paper_width_ptr = dimensions.width_tenths_mm();
         }
 
         Some(buf)
@@ -142,12 +221,13 @@ mod gdi_print {
         printer_name: &str,
         patients: &[super::PatientLabel],
         quantity: u32,
+        dimensions: super::LabelDimensions,
     ) -> Result<String, String> {
         unsafe {
             // ── Build DEVMODE with label dimensions ───────────────────────
             let name_c = CString::new(printer_name).map_err(|_| "Invalid printer name")?;
 
-            let devmode_buf = build_devmode(&name_c);
+            let devmode_buf = build_devmode(&name_c, dimensions);
             let devmode_ptr = devmode_buf
                 .as_ref()
                 .map(|b| b.as_ptr() as *const DEVMODEA)
@@ -184,6 +264,7 @@ mod gdi_print {
             let sz_hdr = -(dpi_y * 10 / 72); // 10 pt  — header
             let sz_body = -(dpi_y * 9 / 72); // 9 pt  — body fields
             let line_h = dpi_y * 11 / 72; // 11 pt spacing between body lines
+            let top_offset = ((dimensions.top_offset_mm() / 25.4) * dpi_y as f32).round() as i32;
 
             let face = to_wide("Helvetica");
 
@@ -215,9 +296,9 @@ mod gdi_print {
                     let brush = CreateSolidBrush(RGB(30, 41, 59));
                     let hdr_rect = RECT {
                         left: 0,
-                        top: 0,
+                        top: top_offset,
                         right: page_w,
-                        bottom: hdr_h,
+                        bottom: top_offset + hdr_h,
                     };
                     FillRect(hdc, &hdr_rect, brush);
                     DeleteObject(brush as *mut _);
@@ -243,7 +324,13 @@ mod gdi_print {
                     SetTextColor(hdc, RGB(255, 255, 255));
 
                     let hdr_text = to_wide("DENTAKAY DENTAL CLINIC");
-                    TextOutW(hdc, 4, 3, hdr_text.as_ptr(), (hdr_text.len() - 1) as i32);
+                    TextOutW(
+                        hdc,
+                        4,
+                        top_offset + 3,
+                        hdr_text.as_ptr(),
+                        (hdr_text.len() - 1) as i32,
+                    );
 
                     // ── Body fields (black, normal) ────────────────────────
                     let hfont_body = CreateFontW(
@@ -266,7 +353,7 @@ mod gdi_print {
                     SetTextColor(hdc, RGB(0, 0, 0));
 
                     let x = 4i32;
-                    let y0 = hdr_h + 4;
+                    let y0 = top_offset + hdr_h + 4;
 
                     // ── Patient name — manual word-wrap with TextOutW ─────────
                     // Avoids DrawTextW's extra GDI line-spacing which creates
@@ -341,10 +428,13 @@ mod gdi_print {
         }
 
         Ok(format!(
-            "Sent {} patient(s) × {} label(s) to '{}'.",
+            "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, top offset {} mm).",
             patients.len(),
             quantity,
-            printer_name
+            printer_name,
+            super::format_mm(dimensions.width_mm()),
+            super::format_mm(dimensions.height_mm()),
+            super::format_mm(dimensions.top_offset_mm())
         ))
     }
 }
@@ -364,15 +454,13 @@ mod macos_print {
     use std::io::BufWriter;
     use std::process::Command;
 
-    // Physical label dimensions — must match the roll installed in the printer
-    const W: f32 = 57.0; // mm wide
-    const H: f32 = 27.0; // mm tall (feed direction)
     const HDR_H: f32 = 7.0; // mm — dark header band height
 
     pub fn print(
         printer_name: &str,
         patients: &[super::PatientLabel],
         quantity: u32,
+        dimensions: super::LabelDimensions,
     ) -> Result<String, String> {
         let printer_name = super::clean_printer_name(printer_name);
         let printer_name = printer_name.as_str();
@@ -384,8 +472,12 @@ mod macos_print {
         let total = (patients.len() as u32) * quantity;
 
         // ── Build PDF ────────────────────────────────────────────────────────
-        let (doc, first_page, first_layer) =
-            PdfDocument::new("Clinic Label", Mm(W), Mm(H), "Layer");
+        let (doc, first_page, first_layer) = PdfDocument::new(
+            "Clinic Label",
+            Mm(dimensions.width_mm()),
+            Mm(dimensions.height_mm()),
+            "Layer",
+        );
 
         // Load Arial for Turkish character support; fall back to built-in
         let font_data = load_font();
@@ -399,7 +491,11 @@ mod macos_print {
         // Collect all pages: first one is created by PdfDocument::new
         let mut pages: Vec<(PdfPageIndex, PdfLayerIndex)> = vec![(first_page, first_layer)];
         for _ in 1..total {
-            let (p, l) = doc.add_page(Mm(W), Mm(H), "Layer");
+            let (p, l) = doc.add_page(
+                Mm(dimensions.width_mm()),
+                Mm(dimensions.height_mm()),
+                "Layer",
+            );
             pages.push((p, l));
         }
 
@@ -422,7 +518,7 @@ mod macos_print {
             for _ in 0..quantity {
                 let (pg, ly) = pages[idx];
                 let layer = doc.get_page(pg).get_layer(ly);
-                draw_label(&layer, &font, name, birth, gender, ak);
+                draw_label(&layer, &font, dimensions, name, birth, gender, ak);
                 idx += 1;
             }
         }
@@ -459,7 +555,7 @@ mod macos_print {
             .copied()
             .find(|p| std::path::Path::new(p).exists());
 
-        let media_arg = format!("media=Custom.{}x{}mm", W as u32, H as u32);
+        let media_arg = dimensions.media_arg();
 
         let try_cmd = |args: &[&str]| -> bool {
             Command::new(args[0])
@@ -500,10 +596,13 @@ mod macos_print {
 
         if success {
             Ok(format!(
-                "Sent {} patient(s) × {} label(s) to '{}'.",
+                "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, top offset {} mm).",
                 patients.len(),
                 quantity,
-                printer_name
+                printer_name,
+                super::format_mm(dimensions.width_mm()),
+                super::format_mm(dimensions.height_mm()),
+                super::format_mm(dimensions.top_offset_mm())
             ))
         } else {
             let detail = out1
@@ -540,23 +639,28 @@ mod macos_print {
     fn draw_label(
         layer: &PdfLayerReference,
         font: &IndirectFontRef,
+        dimensions: super::LabelDimensions,
         name: &str,
         birth: &str,
         gender: &str,
         ak: &str,
     ) {
         // ── Dark header rectangle (top of label) ─────────────────────────────
-        // PDF Y-axis: 0 = bottom, H = top
-        let hdr_bottom = H - HDR_H;
+        // PDF Y-axis: 0 = bottom, label_h = top
+        let label_w = dimensions.width_mm();
+        let label_h = dimensions.height_mm();
+        let hdr_h = HDR_H.min(label_h * 0.35);
+        let content_top = label_h - dimensions.top_offset_mm();
+        let hdr_bottom = content_top - hdr_h;
 
         layer.set_fill_color(Color::Rgb(Rgb::new(0.118, 0.161, 0.231, None)));
         // In printpdf 0.7 use Polygon (with PaintMode::Fill) for filled shapes
         layer.add_polygon(Polygon {
             rings: vec![vec![
                 (Point::new(Mm(0.0), Mm(hdr_bottom)), false),
-                (Point::new(Mm(W), Mm(hdr_bottom)), false),
-                (Point::new(Mm(W), Mm(H)), false),
-                (Point::new(Mm(0.0), Mm(H)), false),
+                (Point::new(Mm(label_w), Mm(hdr_bottom)), false),
+                (Point::new(Mm(label_w), Mm(content_top)), false),
+                (Point::new(Mm(0.0), Mm(content_top)), false),
             ]],
             mode: PaintMode::Fill,
             winding_order: WindingOrder::NonZero,
@@ -710,18 +814,24 @@ fn print_labels(
     printer_name: String,
     patients: Vec<PatientLabel>,
     quantity: u32,
+    label_width_mm: Option<f32>,
+    label_height_mm: Option<f32>,
+    label_top_offset_mm: Option<f32>,
 ) -> Result<String, String> {
+    let dimensions =
+        LabelDimensions::from_options(label_width_mm, label_height_mm, label_top_offset_mm);
+
     #[cfg(windows)]
     {
-        gdi_print::print(&printer_name, &patients, quantity)
+        gdi_print::print(&printer_name, &patients, quantity, dimensions)
     }
     #[cfg(target_os = "macos")]
     {
-        macos_print::print(&printer_name, &patients, quantity)
+        macos_print::print(&printer_name, &patients, quantity, dimensions)
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let _ = (printer_name, patients, quantity);
+        let _ = (printer_name, patients, quantity, dimensions);
         Err("Only supported on Windows and macOS.".to_string())
     }
 }

@@ -8,7 +8,11 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import { ClinicConfig, DEFAULT_CONFIG } from "@/types/config";
+import {
+  ClinicConfig,
+  DEFAULT_CONFIG,
+  DEFAULT_PRINTER_SETTINGS,
+} from "@/types/config";
 import { configStore, CONFIG_STORE_KEY } from "@/store/ConfigStore";
 
 interface ClinicConfigContextValue {
@@ -29,7 +33,14 @@ export function ClinicConfigProvider({ children }: { children: ReactNode }) {
     const stored = configStore.get<ClinicConfig>(CONFIG_STORE_KEY);
     if (stored) {
       // Merge with defaults so new fields get populated without requiring re-setup
-      setConfig({ ...DEFAULT_CONFIG, ...stored } as ClinicConfig);
+      setConfig({
+        ...DEFAULT_CONFIG,
+        ...stored,
+        printer_settings: {
+          ...DEFAULT_PRINTER_SETTINGS,
+          ...(stored.printer_settings || {}),
+        },
+      } as ClinicConfig);
     }
     setIsLoading(false);
   }, []);

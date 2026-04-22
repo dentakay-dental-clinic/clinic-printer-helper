@@ -1,3 +1,18 @@
+export interface PrinterSettings {
+  /** Physical label width in millimeters */
+  label_width_mm?: number;
+  /** Physical label height/feed direction in millimeters */
+  label_height_mm?: number;
+  /** Vertical content offset from the top edge in millimeters */
+  label_top_offset_mm?: number;
+}
+
+export const DEFAULT_PRINTER_SETTINGS: Required<PrinterSettings> = {
+  label_width_mm: 57,
+  label_height_mm: 27,
+  label_top_offset_mm: 0,
+};
+
 export interface ClinicConfig {
   clinic_id: number;
   clinic_name: string;
@@ -11,10 +26,10 @@ export interface ClinicConfig {
   pin_enabled: boolean;
   /** PIN code (stored locally, not sent to server) */
   pin?: string;
-  /** Windows printer name exactly as shown in "Devices and Printers" */
+  /** OS printer queue name exactly as shown in the printer list */
   printer_name?: string;
-  /** Placeholder for future Tauri printer hardware settings */
-  printer_settings: Record<string, unknown>;
+  /** Printer hardware and label stock settings */
+  printer_settings: PrinterSettings;
 }
 
 export const DEFAULT_CONFIG: Partial<ClinicConfig> = {
@@ -24,5 +39,5 @@ export const DEFAULT_CONFIG: Partial<ClinicConfig> = {
   api_key: process.env.NEXT_PUBLIC_API_KEY || "",
   default_quantity: 7,
   pin_enabled: false,
-  printer_settings: {},
+  printer_settings: DEFAULT_PRINTER_SETTINGS,
 };

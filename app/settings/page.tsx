@@ -3,12 +3,34 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useClinicConfig } from "@/contexts/ClinicConfigContext";
-import { ClinicConfig } from "@/types/config";
+import { ClinicConfig, DEFAULT_PRINTER_SETTINGS } from "@/types/config";
 import { configStore, SESSION_UNLOCKED_KEY } from "@/store/ConfigStore";
 import { listPrinters, testPrinter, isTauriApp } from "@/services/ArgoxPrinterService";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Save, Trash2, FlaskConical, RefreshCw, Download, CheckCircle, DatabaseZap } from "lucide-react";
 import { clearPatientInfoCache, getPatientInfoCacheSize } from "@/store/PatientInfoCache";
+import packageJson from "../../package.json";
+
+const MIN_LABEL_MM = 10;
+const MAX_LABEL_MM = 200;
+const MIN_TOP_OFFSET_MM = -20;
+const MAX_TOP_OFFSET_MM = 20;
+
+function parseLabelDimension(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < MIN_LABEL_MM || parsed > MAX_LABEL_MM) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseTopOffset(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < MIN_TOP_OFFSET_MM || parsed > MAX_TOP_OFFSET_MM) {
+    return null;
+  }
+  return parsed;
+}
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -22,6 +44,9 @@ export default function SettingsPage() {
     pin_enabled: false,
     pin: "",
     printer_name: "",
+    label_width_mm: String(DEFAULT_PRINTER_SETTINGS.label_width_mm),
+    label_height_mm: String(DEFAULT_PRINTER_SETTINGS.label_height_mm),
+    label_top_offset_mm: String(DEFAULT_PRINTER_SETTINGS.label_top_offset_mm),
   });
   const [printerList, setPrinterList] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -38,6 +63,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (config) {
+      const printerSettings = {
+        ...DEFAULT_PRINTER_SETTINGS,
+        ...(config.printer_settings || {}),
+      };
       setForm({
         clinic_id: String(config.clinic_id),
         clinic_name: config.clinic_name,
@@ -46,6 +75,9 @@ export default function SettingsPage() {
         pin_enabled: config.pin_enabled,
         pin: config.pin || "",
         printer_name: config.printer_name || "",
+        label_width_mm: String(printerSettings.label_width_mm),
+        label_height_mm: String(printerSettings.label_height_mm),
+        label_top_offset_mm: String(printerSettings.label_top_offset_mm),
       });
     }
   }, [config]);
@@ -66,6 +98,17 @@ export default function SettingsPage() {
     if (!clinicId) { setError("Clinic ID must be a number."); return; }
     if (!form.clinic_name.trim()) { setError("Clinic name is required."); return; }
     if (form.pin_enabled && form.pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
+    const labelWidth = parseLabelDimension(form.label_width_mm);
+    const labelHeight = parseLabelDimension(form.label_height_mm);
+    const topOffset = parseTopOffset(form.label_top_offset_mm);
+    if (labelWidth === null || labelHeight === null) {
+      setError(`Label dimensions must be between ${MIN_LABEL_MM} and ${MAX_LABEL_MM} mm.`);
+      return;
+    }
+    if (topOffset === null) {
+      setError(`Top offset must be between ${MIN_TOP_OFFSET_MM} and ${MAX_TOP_OFFSET_MM} mm.`);
+      return;
+    }
 
     const updated: ClinicConfig = {
       clinic_id: clinicId,
@@ -76,7 +119,13 @@ export default function SettingsPage() {
       pin_enabled: form.pin_enabled,
       pin: form.pin_enabled ? form.pin : undefined,
       printer_name: form.printer_name || undefined,
-      printer_settings: config?.printer_settings || {},
+      printer_settings: {
+        ...DEFAULT_PRINTER_SETTINGS,
+        ...(config?.printer_settings || {}),
+        label_width_mm: labelWidth,
+        label_height_mm: labelHeight,
+        label_top_offset_mm: topOffset,
+      },
     };
     saveConfig(updated);
     setSaved(true);
@@ -162,7 +211,7 @@ export default function SettingsPage() {
             <input type="number" min={1} max={99} value={form.default_quantity} onChange={(e) => update("default_quantity", e.target.value)} className={inputClass} />
           </Field>
 
-          <Field label="Argox Printer" hint="Select the label printer installed on this computer">
+          <Field label="Label Printer" hint="Select the label printer installed on this computer">
             {printerList.length > 0 ? (
               <select
                 value={form.printer_name}
@@ -215,6 +264,47 @@ export default function SettingsPage() {
             )}
           </Field>
 
+          <Field label="Label dimensions" hint="Millimeters">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Width</span>
+                <input
+                  type="number"
+                  min={MIN_LABEL_MM}
+                  max={MAX_LABEL_MM}
+                  step="0.1"
+                  value={form.label_width_mm}
+                  onChange={(e) => update("label_width_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Height</span>
+                <input
+                  type="number"
+                  min={MIN_LABEL_MM}
+                  max={MAX_LABEL_MM}
+                  step="0.1"
+                  value={form.label_height_mm}
+                  onChange={(e) => update("label_height_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Top offset</span>
+                <input
+                  type="number"
+                  min={MIN_TOP_OFFSET_MM}
+                  max={MAX_TOP_OFFSET_MM}
+                  step="0.1"
+                  value={form.label_top_offset_mm}
+                  onChange={(e) => update("label_top_offset_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+            </div>
+          </Field>
+
           {/* PIN toggle */}
           <div className="flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800 px-4 py-3">
             <p className="text-sm font-medium text-slate-700 dark:text-slate-300">PIN lock</p>
@@ -250,7 +340,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">App updates</p>
-                <p className="text-xs text-slate-400">v{require("../../package.json").version}</p>
+                <p className="text-xs text-slate-400">v{packageJson.version}</p>
               </div>
 
               {updateState === "idle" || updateState === "up-to-date" || updateState === "error" ? (

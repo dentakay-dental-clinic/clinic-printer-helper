@@ -3,11 +3,35 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useClinicConfig } from "@/contexts/ClinicConfigContext";
-import { ClinicConfig } from "@/types/config";
-import { DEFAULT_CONFIG } from "@/types/config";
+import {
+  ClinicConfig,
+  DEFAULT_CONFIG,
+  DEFAULT_PRINTER_SETTINGS,
+} from "@/types/config";
 import { listPrinters } from "@/services/ArgoxPrinterService";
 import { cn } from "@/lib/utils";
 import { Printer, ChevronRight } from "lucide-react";
+
+const MIN_LABEL_MM = 10;
+const MAX_LABEL_MM = 200;
+const MIN_TOP_OFFSET_MM = -20;
+const MAX_TOP_OFFSET_MM = 20;
+
+function parseLabelDimension(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < MIN_LABEL_MM || parsed > MAX_LABEL_MM) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseTopOffset(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < MIN_TOP_OFFSET_MM || parsed > MAX_TOP_OFFSET_MM) {
+    return null;
+  }
+  return parsed;
+}
 
 export default function SetupPage() {
   const router = useRouter();
@@ -21,6 +45,9 @@ export default function SetupPage() {
     pin_enabled: false,
     pin: "",
     printer_name: "",
+    label_width_mm: String(DEFAULT_PRINTER_SETTINGS.label_width_mm),
+    label_height_mm: String(DEFAULT_PRINTER_SETTINGS.label_height_mm),
+    label_top_offset_mm: String(DEFAULT_PRINTER_SETTINGS.label_top_offset_mm),
   });
   const [printerList, setPrinterList] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +78,17 @@ export default function SetupPage() {
       setError("PIN must be at least 4 digits.");
       return;
     }
+    const labelWidth = parseLabelDimension(form.label_width_mm);
+    const labelHeight = parseLabelDimension(form.label_height_mm);
+    const topOffset = parseTopOffset(form.label_top_offset_mm);
+    if (labelWidth === null || labelHeight === null) {
+      setError(`Label dimensions must be between ${MIN_LABEL_MM} and ${MAX_LABEL_MM} mm.`);
+      return;
+    }
+    if (topOffset === null) {
+      setError(`Top offset must be between ${MIN_TOP_OFFSET_MM} and ${MAX_TOP_OFFSET_MM} mm.`);
+      return;
+    }
 
     const config: ClinicConfig = {
       clinic_id: clinicId,
@@ -61,7 +99,12 @@ export default function SetupPage() {
       pin_enabled: form.pin_enabled,
       pin: form.pin_enabled ? form.pin : undefined,
       printer_name: form.printer_name || undefined,
-      printer_settings: {},
+      printer_settings: {
+        ...DEFAULT_PRINTER_SETTINGS,
+        label_width_mm: labelWidth,
+        label_height_mm: labelHeight,
+        label_top_offset_mm: topOffset,
+      },
     };
 
     saveConfig(config);
@@ -142,8 +185,8 @@ export default function SetupPage() {
 
           {/* Printer selector — only meaningful inside Tauri */}
           <Field
-            label="Argox Printer"
-            hint="Select the Argox printer installed on this computer."
+            label="Label Printer"
+            hint="Select the label printer installed on this computer."
           >
             {printerList.length > 0 ? (
               <select
@@ -165,6 +208,47 @@ export default function SetupPage() {
                 className={inputClass}
               />
             )}
+          </Field>
+
+          <Field label="Label dimensions" hint="Millimeters">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Width</span>
+                <input
+                  type="number"
+                  min={MIN_LABEL_MM}
+                  max={MAX_LABEL_MM}
+                  step="0.1"
+                  value={form.label_width_mm}
+                  onChange={(e) => update("label_width_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Height</span>
+                <input
+                  type="number"
+                  min={MIN_LABEL_MM}
+                  max={MAX_LABEL_MM}
+                  step="0.1"
+                  value={form.label_height_mm}
+                  onChange={(e) => update("label_height_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Top offset</span>
+                <input
+                  type="number"
+                  min={MIN_TOP_OFFSET_MM}
+                  max={MAX_TOP_OFFSET_MM}
+                  step="0.1"
+                  value={form.label_top_offset_mm}
+                  onChange={(e) => update("label_top_offset_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+            </div>
           </Field>
 
           {/* PIN toggle */}
