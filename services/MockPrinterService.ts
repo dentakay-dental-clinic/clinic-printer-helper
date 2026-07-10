@@ -1,4 +1,4 @@
-import { IPrinterService, PrintJob, PrintResult } from "./PrinterService";
+import { IPrinterService, PrintJob, PrintResult, TextPrintJob } from "./PrinterService";
 
 /**
  * MockPrinterService — development stand-in for the real Tauri printer.
@@ -41,6 +41,25 @@ export class MockPrinterService implements IPrinterService {
     return {
       success: true,
       message: `Mock print complete — ${job.patients.length} patient(s) × ${job.quantity} label(s)`,
+      jobId,
+    };
+  }
+
+  async printText(job: TextPrintJob): Promise<PrintResult> {
+    const jobId = `mock-text-${Date.now()}`;
+
+    console.group(`[MockPrinterService] Text Print Job: ${jobId}`);
+    console.log("Quantity:", job.quantity);
+    console.log("Font pt:", job.fontPt ?? 12);
+    console.log("Align:", job.align ?? "center");
+    console.log("Text:", job.text);
+    console.groupEnd();
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    return {
+      success: true,
+      message: `Mock print complete — ${job.quantity} text label(s)`,
       jobId,
     };
   }

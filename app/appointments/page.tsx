@@ -20,7 +20,7 @@ import { createClientFromConfig } from "@/services/api";
 import { fetchPatientByAk, patientMSInfoToAppointment } from "@/services/patientsApi";
 import { Appointment } from "@/types/appointment";
 import { cn, formatDisplayDate } from "@/lib/utils";
-import { RefreshCw, Settings, Printer, CheckSquare, AlertCircle, ChevronLeft, ChevronRight, History, UserSearch, Search, X, Loader2 } from "lucide-react";
+import { RefreshCw, Settings, Printer, CheckSquare, AlertCircle, ChevronLeft, ChevronRight, History, UserSearch, Search, X, Loader2, Type } from "lucide-react";
 
 const PAGE_SIZE = 5;
 
@@ -300,6 +300,11 @@ function AppointmentsPageInner() {
               )} />
               {printerService.getStatus()}
             </div>
+            <button onClick={() => router.push("/print-text")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-500/30 ring-1 ring-inset ring-white/10 transition-colors mr-1">
+              <Type size={14} strokeWidth={2.5} />
+              <span>Text Label</span>
+            </button>
             <button onClick={() => setShowHistory(true)}
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
               <History size={13} />

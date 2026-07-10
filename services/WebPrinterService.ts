@@ -1,4 +1,4 @@
-import { IPrinterService, PrintJob, PrintResult } from "./PrinterService";
+import { IPrinterService, PrintJob, PrintResult, TextPrintJob } from "./PrinterService";
 import { formatDisplayDate } from "@/lib/utils";
 
 /**
@@ -71,6 +71,66 @@ export class WebPrinterService implements IPrinterService {
       jobId,
     };
   }
+
+  async printText(job: TextPrintJob): Promise<PrintResult> {
+    const jobId = `print-text-${Date.now()}`;
+
+    const printArea = document.getElementById("print-area");
+    if (!printArea) {
+      return { success: false, message: "Print area not found in DOM.", jobId };
+    }
+
+    const fontPt = job.fontPt ?? 12;
+    const align = job.align ?? "center";
+
+    const labelsHtml = Array.from({ length: job.quantity }, () =>
+      buildTextLabelHtml(job.text, fontPt, align)
+    )
+      // page-break-after: always on all except the very last label
+      .map((html, i, arr) =>
+        i < arr.length - 1
+          ? html.replace('class="text-label-page"', 'class="text-label-page text-label-break"')
+          : html
+      )
+      .join("");
+
+    printArea.innerHTML = labelsHtml;
+
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+    window.print();
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        printArea.innerHTML = "";
+        resolve();
+      };
+      window.addEventListener("afterprint", finish, { once: true });
+      setTimeout(finish, 60_000);
+    });
+
+    return {
+      success: true,
+      message: `Sent ${job.quantity} text label(s) to printer.`,
+      jobId,
+    };
+  }
+}
+
+function buildTextLabelHtml(
+  text: string,
+  fontPt: number,
+  align: "left" | "center"
+): string {
+  const safe = (text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const justify = align === "center" ? "center" : "flex-start";
+  return `<div class="text-label-page" style="font-size:${fontPt}pt;text-align:${align};justify-content:${justify}">${safe}</div>`;
 }
 
 function buildLabelHtml(

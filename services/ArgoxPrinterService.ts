@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_PRINTER_SETTINGS, PrinterSettings } from "@/types/config";
-import { IPrinterService, PrintJob, PrintResult } from "./PrinterService";
+import { IPrinterService, PrintJob, PrintResult, TextPrintJob } from "./PrinterService";
 
 /**
  * ArgoxPrinterService — sends labels through the native OS print path
@@ -32,6 +32,31 @@ export class ArgoxPrinterService implements IPrinterService {
         printerName: this.printerName,
         patients: job.patients,
         quantity: job.quantity,
+        labelWidthMm:
+          this.printerSettings.label_width_mm ??
+          DEFAULT_PRINTER_SETTINGS.label_width_mm,
+        labelHeightMm:
+          this.printerSettings.label_height_mm ??
+          DEFAULT_PRINTER_SETTINGS.label_height_mm,
+        labelTopOffsetMm:
+          this.printerSettings.label_top_offset_mm ??
+          DEFAULT_PRINTER_SETTINGS.label_top_offset_mm,
+      });
+      return { success: true, message: msg, jobId };
+    } catch (err) {
+      return { success: false, message: String(err), jobId };
+    }
+  }
+
+  async printText(job: TextPrintJob): Promise<PrintResult> {
+    const jobId = `argox-text-${Date.now()}`;
+    try {
+      const msg = await invoke<string>("print_text", {
+        printerName: this.printerName,
+        text: job.text,
+        quantity: job.quantity,
+        fontPt: job.fontPt ?? 12,
+        align: job.align ?? "center",
         labelWidthMm:
           this.printerSettings.label_width_mm ??
           DEFAULT_PRINTER_SETTINGS.label_width_mm,

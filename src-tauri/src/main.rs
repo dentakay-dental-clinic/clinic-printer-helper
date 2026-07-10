@@ -437,6 +437,146 @@ mod gdi_print {
             super::format_mm(dimensions.top_offset_mm())
         ))
     }
+
+    /// Print arbitrary free text onto one or more labels.
+    ///
+    /// Text is word-wrapped to the label width, block-centered vertically,
+    /// and horizontally left- or centre-aligned. Newlines in the input start
+    /// a new paragraph. Same GDI/DEVMODE path as `print` so it works silently
+    /// on the Argox driver.
+    pub fn print_text(
+        printer_name: &str,
+        text: &str,
+        quantity: u32,
+        font_pt: u32,
+        center: bool,
+        dimensions: super::LabelDimensions,
+    ) -> Result<String, String> {
+        unsafe {
+            let name_c = CString::new(printer_name).map_err(|_| "Invalid printer name")?;
+
+            let devmode_buf = build_devmode(&name_c, dimensions);
+            let devmode_ptr = devmode_buf
+                .as_ref()
+                .map(|b| b.as_ptr() as *const DEVMODEA)
+                .unwrap_or(ptr::null());
+
+            let hdc = CreateDCA(ptr::null(), name_c.as_ptr(), ptr::null(), devmode_ptr);
+            if hdc.is_null() {
+                return Err(format!(
+                    "CreateDC failed for '{}'. Is the driver installed?",
+                    printer_name
+                ));
+            }
+
+            let doc_name_c = CString::new("Clinic Text Label").unwrap();
+            let di = DOCINFOA {
+                cbSize: std::mem::size_of::<DOCINFOA>() as i32,
+                lpszDocName: doc_name_c.as_ptr(),
+                lpszOutput: ptr::null(),
+                lpszDatatype: ptr::null(),
+                fwType: 0,
+            };
+            if StartDocA(hdc, &di) <= 0 {
+                DeleteDC(hdc);
+                return Err("StartDoc failed — printer may be offline.".to_string());
+            }
+
+            let dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+            let page_w = GetDeviceCaps(hdc, HORZRES);
+            let page_h = GetDeviceCaps(hdc, VERTRES);
+
+            let font_h = (dpi_y as f32 * font_pt as f32 / 72.0).round() as i32;
+            let line_h = (font_h as f32 * 1.25).round() as i32;
+            let top_offset = ((dimensions.top_offset_mm() / 25.4) * dpi_y as f32).round() as i32;
+            // ~1.5 mm side margin
+            let margin = ((1.5 / 25.4) * dpi_y as f32).round() as i32;
+            let max_w = (page_w - margin * 2).max(1);
+
+            let face = to_wide("Arial");
+
+            for _ in 0..quantity {
+                if StartPage(hdc) <= 0 {
+                    continue;
+                }
+
+                SetBkMode(hdc, TRANSPARENT as i32);
+
+                let hfont = CreateFontW(
+                    -font_h,
+                    0,
+                    0,
+                    0,
+                    FW_BOLD as i32,
+                    0,
+                    0,
+                    0,
+                    DEFAULT_CHARSET as u32,
+                    OUT_DEFAULT_PRECIS as u32,
+                    CLIP_DEFAULT_PRECIS as u32,
+                    DEFAULT_QUALITY as u32,
+                    (DEFAULT_PITCH | FF_SWISS) as u32,
+                    face.as_ptr(),
+                );
+                SelectObject(hdc, hfont as *mut _);
+                SetTextColor(hdc, RGB(0, 0, 0));
+
+                // ── Word-wrap: each newline is a paragraph, packed greedily ──
+                let mut lines: Vec<String> = Vec::new();
+                for para in text.split('\n') {
+                    if para.trim().is_empty() {
+                        lines.push(String::new());
+                        continue;
+                    }
+                    let mut current = String::new();
+                    for word in para.split_whitespace() {
+                        let candidate = if current.is_empty() {
+                            word.to_string()
+                        } else {
+                            format!("{} {}", current, word)
+                        };
+                        let wc = to_wide(&candidate);
+                        let mut sz = SIZE { cx: 0, cy: 0 };
+                        GetTextExtentPoint32W(hdc, wc.as_ptr(), (wc.len() - 1) as i32, &mut sz);
+                        if sz.cx > max_w && !current.is_empty() {
+                            lines.push(current.clone());
+                            current = word.to_string();
+                        } else {
+                            current = candidate;
+                        }
+                    }
+                    if !current.is_empty() {
+                        lines.push(current);
+                    }
+                }
+
+                // ── Vertically centre the whole block in the printable area ──
+                let total_h = lines.len() as i32 * line_h;
+                let mut y = top_offset + ((page_h - top_offset - total_h) / 2).max(0);
+
+                for line in &lines {
+                    let wl = to_wide(line);
+                    let mut sz = SIZE { cx: 0, cy: 0 };
+                    GetTextExtentPoint32W(hdc, wl.as_ptr(), (wl.len() - 1) as i32, &mut sz);
+                    let x = if center {
+                        ((page_w - sz.cx) / 2).max(margin)
+                    } else {
+                        margin
+                    };
+                    TextOutW(hdc, x, y, wl.as_ptr(), (wl.len() - 1) as i32);
+                    y += line_h;
+                }
+
+                DeleteObject(hfont as *mut _);
+                EndPage(hdc);
+            }
+
+            EndDoc(hdc);
+            DeleteDC(hdc);
+        }
+
+        Ok(format!("Sent {} text label(s) to '{}'.", quantity, printer_name))
+    }
 }
 
 // ── macOS native label printing via printpdf + lpr ───────────────────────────
@@ -733,6 +873,202 @@ mod macos_print {
             .find(|e| e.path().extension().and_then(|x| x.to_str()) == Some("ttf"))
             .and_then(|e| fs::read(e.path()).ok())
     }
+
+    /// Print arbitrary free text onto one or more labels (macOS PDF + lpr).
+    ///
+    /// Text is word-wrapped (character-width estimate) to the label width and
+    /// block-centred vertically. `center` toggles horizontal centring.
+    pub fn print_text(
+        printer_name: &str,
+        text: &str,
+        quantity: u32,
+        font_pt: f32,
+        center: bool,
+        dimensions: super::LabelDimensions,
+    ) -> Result<String, String> {
+        let printer_name = super::clean_printer_name(printer_name);
+        let printer_name = printer_name.as_str();
+
+        if quantity == 0 {
+            return Err("Nothing to print.".to_string());
+        }
+
+        let label_w = dimensions.width_mm();
+        let label_h = dimensions.height_mm();
+
+        let (doc, first_page, first_layer) =
+            PdfDocument::new("Clinic Text Label", Mm(label_w), Mm(label_h), "Layer");
+
+        let font_data = load_font();
+        let font: IndirectFontRef = match font_data {
+            Some(ref bytes) => doc
+                .add_external_font(bytes.as_slice())
+                .unwrap_or_else(|_| doc.add_builtin_font(BuiltinFont::HelveticaBold).unwrap()),
+            None => doc.add_builtin_font(BuiltinFont::HelveticaBold).unwrap(),
+        };
+
+        let mut pages: Vec<(PdfPageIndex, PdfLayerIndex)> = vec![(first_page, first_layer)];
+        for _ in 1..quantity {
+            let (p, l) = doc.add_page(Mm(label_w), Mm(label_h), "Layer");
+            pages.push((p, l));
+        }
+
+        // ── Word-wrap using an average character-width estimate ──────────────
+        // 1 pt = 0.352778 mm; ~0.52 is a reasonable average glyph-width ratio.
+        let margin = 2.0_f32;
+        let max_w = (label_w - margin * 2.0).max(1.0);
+        let char_w = (font_pt * 0.352778 * 0.52).max(0.1);
+        let max_chars = ((max_w / char_w).floor() as usize).max(1);
+
+        let mut lines: Vec<String> = Vec::new();
+        for para in text.split('\n') {
+            if para.trim().is_empty() {
+                lines.push(String::new());
+                continue;
+            }
+            let mut current = String::new();
+            for word in para.split_whitespace() {
+                let candidate = if current.is_empty() {
+                    word.to_string()
+                } else {
+                    format!("{} {}", current, word)
+                };
+                if candidate.chars().count() > max_chars && !current.is_empty() {
+                    lines.push(current.clone());
+                    current = word.to_string();
+                } else {
+                    current = candidate;
+                }
+            }
+            if !current.is_empty() {
+                lines.push(current);
+            }
+        }
+
+        let line_h = font_pt * 0.352778 * 1.25;
+        let total_h = lines.len() as f32 * line_h;
+        let content_top = label_h - dimensions.top_offset_mm();
+        // Top of the centred block, then step baselines downward.
+        let block_top = ((content_top + total_h) / 2.0).min(content_top);
+        let ascent = font_pt * 0.352778 * 0.8;
+
+        for (pg, ly) in &pages {
+            let layer = doc.get_page(*pg).get_layer(*ly);
+            layer.set_fill_color(Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)));
+            let mut baseline = block_top - ascent;
+            for line in &lines {
+                let x = if center {
+                    let w = line.chars().count() as f32 * char_w;
+                    ((label_w - w) / 2.0).max(margin)
+                } else {
+                    margin
+                };
+                layer.use_text(line, font_pt, Mm(x), Mm(baseline.max(0.0)), &font);
+                baseline -= line_h;
+            }
+        }
+
+        // ── Save + send (same lpr/lp fallback chain as `print`) ──────────────
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let tmp = format!("/tmp/clinic_text_{}.pdf", millis);
+        let file = fs::File::create(&tmp)
+            .map_err(|e| format!("cannot create temp file {}: {}", tmp, e))?;
+        doc.save(&mut BufWriter::new(file))
+            .map_err(|e| format!("cannot save PDF: {}", e))?;
+
+        let media_arg = dimensions.media_arg();
+        let result = send_to_printer(printer_name, &tmp, &media_arg);
+        let _ = fs::remove_file(&tmp);
+
+        result.map(|_| format!("Sent {} text label(s) to '{}'.", quantity, printer_name))
+    }
+
+    /// Send an already-written PDF to a CUPS queue, trying lpr (with and
+    /// without the media option) then lp. Returns the failure detail on error.
+    fn send_to_printer(printer_name: &str, tmp: &str, media_arg: &str) -> Result<(), String> {
+        let lpr_paths = [
+            "/usr/bin/lpr",
+            "/opt/homebrew/bin/lpr",
+            "/usr/local/bin/lpr",
+        ];
+        let lp_paths = ["/usr/bin/lp", "/opt/homebrew/bin/lp", "/usr/local/bin/lp"];
+        let lpr = lpr_paths
+            .iter()
+            .copied()
+            .find(|p| std::path::Path::new(p).exists());
+        let lp = lp_paths
+            .iter()
+            .copied()
+            .find(|p| std::path::Path::new(p).exists());
+
+        let try_cmd = |args: &[&str]| -> bool {
+            Command::new(args[0])
+                .env("LANG", "C")
+                .env("LC_ALL", "C")
+                .args(&args[1..])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+
+        let first_lpr = lpr.unwrap_or("/usr/bin/lpr");
+        let out1 = Command::new(first_lpr)
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
+            .args(["-P", printer_name, "-o", media_arg, tmp])
+            .output();
+
+        let success = match &out1 {
+            Ok(o) if o.status.success() => true,
+            _ => {
+                let ok2 = lpr
+                    .map(|b| try_cmd(&[b, "-P", printer_name, tmp]))
+                    .unwrap_or(false);
+                if ok2 {
+                    true
+                } else {
+                    lp.map(|b| try_cmd(&[b, "-d", printer_name, tmp]))
+                        .unwrap_or(false)
+                }
+            }
+        };
+
+        if success {
+            Ok(())
+        } else {
+            let detail = out1
+                .ok()
+                .map(|o| {
+                    let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    [e, s]
+                        .iter()
+                        .filter(|x| !x.is_empty())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+                .unwrap_or_default();
+            let hint = if lpr.is_none() && lp.is_none() {
+                " (CUPS not found — run: xcode-select --install)".to_string()
+            } else {
+                String::new()
+            };
+            Err(format!(
+                "Print failed for '{}': {}{}",
+                printer_name,
+                if detail.is_empty() {
+                    "all lpr/lp attempts rejected the job".to_string()
+                } else {
+                    detail
+                },
+                hint
+            ))
+        }
+    }
 }
 
 // ── macOS printer enumeration via lpstat ──────────────────────────────────────
@@ -837,6 +1173,52 @@ fn print_labels(
 }
 
 #[tauri::command]
+fn print_text(
+    printer_name: String,
+    text: String,
+    quantity: u32,
+    font_pt: Option<u32>,
+    align: Option<String>,
+    label_width_mm: Option<f32>,
+    label_height_mm: Option<f32>,
+    label_top_offset_mm: Option<f32>,
+) -> Result<String, String> {
+    let dimensions =
+        LabelDimensions::from_options(label_width_mm, label_height_mm, label_top_offset_mm);
+    // Clamp font size to a sane range; default 12 pt.
+    let font_pt = font_pt.unwrap_or(12).clamp(6, 48);
+    let center = align.as_deref() != Some("left");
+
+    if text.trim().is_empty() {
+        return Err("Nothing to print — text is empty.".to_string());
+    }
+    if quantity == 0 {
+        return Err("Quantity must be at least 1.".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        gdi_print::print_text(&printer_name, &text, quantity, font_pt, center, dimensions)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_print::print_text(
+            &printer_name,
+            &text,
+            quantity,
+            font_pt as f32,
+            center,
+            dimensions,
+        )
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = (printer_name, text, quantity, font_pt, center, dimensions);
+        Err("Only supported on Windows and macOS.".to_string())
+    }
+}
+
+#[tauri::command]
 fn test_printer(printer_name: String) -> String {
     #[cfg(windows)]
     {
@@ -930,6 +1312,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             print_labels,
+            print_text,
             list_printers,
             test_printer
         ])
