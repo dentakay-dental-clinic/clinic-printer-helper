@@ -15,6 +15,8 @@ const MIN_LABEL_MM = 10;
 const MAX_LABEL_MM = 200;
 const MIN_TOP_OFFSET_MM = -20;
 const MAX_TOP_OFFSET_MM = 20;
+const MIN_LEFT_OFFSET_MM = -20;
+const MAX_LEFT_OFFSET_MM = 20;
 
 function parseLabelDimension(value: string): number | null {
   const parsed = Number.parseFloat(value);
@@ -27,6 +29,14 @@ function parseLabelDimension(value: string): number | null {
 function parseTopOffset(value: string): number | null {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed) || parsed < MIN_TOP_OFFSET_MM || parsed > MAX_TOP_OFFSET_MM) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseLeftOffset(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < MIN_LEFT_OFFSET_MM || parsed > MAX_LEFT_OFFSET_MM) {
     return null;
   }
   return parsed;
@@ -47,6 +57,7 @@ export default function SettingsPage() {
     label_width_mm: String(DEFAULT_PRINTER_SETTINGS.label_width_mm),
     label_height_mm: String(DEFAULT_PRINTER_SETTINGS.label_height_mm),
     label_top_offset_mm: String(DEFAULT_PRINTER_SETTINGS.label_top_offset_mm),
+    label_left_offset_mm: String(DEFAULT_PRINTER_SETTINGS.label_left_offset_mm),
   });
   const [printerList, setPrinterList] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -78,6 +89,7 @@ export default function SettingsPage() {
         label_width_mm: String(printerSettings.label_width_mm),
         label_height_mm: String(printerSettings.label_height_mm),
         label_top_offset_mm: String(printerSettings.label_top_offset_mm),
+        label_left_offset_mm: String(printerSettings.label_left_offset_mm),
       });
     }
   }, [config]);
@@ -101,12 +113,17 @@ export default function SettingsPage() {
     const labelWidth = parseLabelDimension(form.label_width_mm);
     const labelHeight = parseLabelDimension(form.label_height_mm);
     const topOffset = parseTopOffset(form.label_top_offset_mm);
+    const leftOffset = parseLeftOffset(form.label_left_offset_mm);
     if (labelWidth === null || labelHeight === null) {
       setError(`Label dimensions must be between ${MIN_LABEL_MM} and ${MAX_LABEL_MM} mm.`);
       return;
     }
     if (topOffset === null) {
       setError(`Top offset must be between ${MIN_TOP_OFFSET_MM} and ${MAX_TOP_OFFSET_MM} mm.`);
+      return;
+    }
+    if (leftOffset === null) {
+      setError(`Left offset must be between ${MIN_LEFT_OFFSET_MM} and ${MAX_LEFT_OFFSET_MM} mm.`);
       return;
     }
 
@@ -125,6 +142,7 @@ export default function SettingsPage() {
         label_width_mm: labelWidth,
         label_height_mm: labelHeight,
         label_top_offset_mm: topOffset,
+        label_left_offset_mm: leftOffset,
       },
     };
     saveConfig(updated);
@@ -264,8 +282,11 @@ export default function SettingsPage() {
             )}
           </Field>
 
-          <Field label="Label dimensions" hint="Millimeters">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field
+            label="Label dimensions"
+            hint="Millimeters — width is across the print head, height is the feed direction. Use the offsets to nudge the printed block if it lands off the label."
+          >
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <label className="space-y-1">
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Width</span>
                 <input
@@ -299,6 +320,18 @@ export default function SettingsPage() {
                   step="0.1"
                   value={form.label_top_offset_mm}
                   onChange={(e) => update("label_top_offset_mm", e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Left offset</span>
+                <input
+                  type="number"
+                  min={MIN_LEFT_OFFSET_MM}
+                  max={MAX_LEFT_OFFSET_MM}
+                  step="0.5"
+                  value={form.label_left_offset_mm}
+                  onChange={(e) => update("label_left_offset_mm", e.target.value)}
                   className={inputClass}
                 />
               </label>

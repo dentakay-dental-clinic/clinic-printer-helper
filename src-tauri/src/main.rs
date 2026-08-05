@@ -16,16 +16,25 @@ struct PatientLabel {
 const DEFAULT_LABEL_WIDTH_MM: f32 = 57.0;
 const DEFAULT_LABEL_HEIGHT_MM: f32 = 27.0;
 const DEFAULT_LABEL_TOP_OFFSET_MM: f32 = 0.0;
+const DEFAULT_LABEL_LEFT_OFFSET_MM: f32 = 0.0;
 const MIN_LABEL_MM: f32 = 10.0;
 const MAX_LABEL_MM: f32 = 200.0;
 const MIN_TOP_OFFSET_MM: f32 = -20.0;
 const MAX_TOP_OFFSET_MM: f32 = 20.0;
+const MIN_LEFT_OFFSET_MM: f32 = -20.0;
+const MAX_LEFT_OFFSET_MM: f32 = 20.0;
+
+/// Horizontal safe zone kept clear on both sides of every label.
+/// Thermal label stock is die-cut with a ±1 mm tolerance and the roll can sit
+/// slightly off-centre in the guides, so content must never start at dot 0.
+const SIDE_MARGIN_MM: f32 = 2.0;
 
 #[derive(Clone, Copy)]
 struct LabelDimensions {
     width_mm: f32,
     height_mm: f32,
     top_offset_mm: f32,
+    left_offset_mm: f32,
 }
 
 impl LabelDimensions {
@@ -33,11 +42,13 @@ impl LabelDimensions {
         width_mm: Option<f32>,
         height_mm: Option<f32>,
         top_offset_mm: Option<f32>,
+        left_offset_mm: Option<f32>,
     ) -> Self {
         Self {
             width_mm: clean_dimension(width_mm, DEFAULT_LABEL_WIDTH_MM),
             height_mm: clean_dimension(height_mm, DEFAULT_LABEL_HEIGHT_MM),
             top_offset_mm: clean_top_offset(top_offset_mm),
+            left_offset_mm: clean_left_offset(left_offset_mm),
         }
     }
 
@@ -51,6 +62,10 @@ impl LabelDimensions {
 
     fn top_offset_mm(self) -> f32 {
         self.top_offset_mm
+    }
+
+    fn left_offset_mm(self) -> f32 {
+        self.left_offset_mm
     }
 
     fn width_tenths_mm(self) -> i16 {
@@ -82,6 +97,13 @@ fn clean_top_offset(value: Option<f32>) -> f32 {
     match value {
         Some(v) if v.is_finite() && (MIN_TOP_OFFSET_MM..=MAX_TOP_OFFSET_MM).contains(&v) => v,
         _ => DEFAULT_LABEL_TOP_OFFSET_MM,
+    }
+}
+
+fn clean_left_offset(value: Option<f32>) -> f32 {
+    match value {
+        Some(v) if v.is_finite() && (MIN_LEFT_OFFSET_MM..=MAX_LEFT_OFFSET_MM).contains(&v) => v,
+        _ => DEFAULT_LABEL_LEFT_OFFSET_MM,
     }
 }
 
@@ -257,6 +279,7 @@ mod gdi_print {
             }
 
             // ── Page / font metrics ────────────────────────────────────────
+            let dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
             let dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
             let page_w = GetDeviceCaps(hdc, HORZRES);
 
@@ -265,6 +288,17 @@ mod gdi_print {
             let sz_body = -(dpi_y * 9 / 72); // 9 pt  — body fields
             let line_h = dpi_y * 11 / 72; // 11 pt spacing between body lines
             let top_offset = ((dimensions.top_offset_mm() / 25.4) * dpi_y as f32).round() as i32;
+
+            // ── Horizontal placement ───────────────────────────────────────
+            // GDI x = 0 is the first dot of the print head, which is NOT the
+            // physical left edge of the label — the roll sits a few mm to the
+            // right of it in the media guides. Widening the page does not fix
+            // that (it only moves the right boundary), so content needs a real
+            // side margin plus a user-tunable left offset.
+            let side_margin = ((super::SIDE_MARGIN_MM / 25.4) * dpi_x as f32).round() as i32;
+            let left_offset = ((dimensions.left_offset_mm() / 25.4) * dpi_x as f32).round() as i32;
+            let content_x = (side_margin + left_offset).max(0);
+            let content_w = (page_w - content_x - side_margin).max(1);
 
             let face = to_wide("Helvetica");
 
@@ -294,8 +328,10 @@ mod gdi_print {
                     // ── Dark header band ───────────────────────────────────
                     let hdr_h = -(sz_hdr) + 6; // a bit taller than the font
                     let brush = CreateSolidBrush(RGB(30, 41, 59));
+                    // Band bleeds to both edges of the label, but starts at the
+                    // same offset as the content so it never runs off the left.
                     let hdr_rect = RECT {
-                        left: 0,
+                        left: left_offset.max(0),
                         top: top_offset,
                         right: page_w,
                         bottom: top_offset + hdr_h,
@@ -323,10 +359,43 @@ mod gdi_print {
                     SelectObject(hdc, hfont_hdr as *mut _);
                     SetTextColor(hdc, RGB(255, 255, 255));
 
+                    // Shrink the clinic name if it no longer fits between the
+                    // side margins (it is the widest fixed string on the label).
                     let hdr_text = to_wide("DENTAKAY DENTAL CLINIC");
+                    let mut hdr_sz = SIZE { cx: 0, cy: 0 };
+                    GetTextExtentPoint32W(
+                        hdc,
+                        hdr_text.as_ptr(),
+                        (hdr_text.len() - 1) as i32,
+                        &mut hdr_sz,
+                    );
+                    let mut hfont_hdr = hfont_hdr;
+                    if hdr_sz.cx > content_w && hdr_sz.cx > 0 {
+                        let fitted_pt = ((10 * content_w) / hdr_sz.cx).clamp(6, 10);
+                        let hfont_fit = CreateFontW(
+                            -(dpi_y * fitted_pt / 72),
+                            0,
+                            0,
+                            0,
+                            FW_BOLD as i32,
+                            0,
+                            0,
+                            0,
+                            DEFAULT_CHARSET as u32,
+                            OUT_DEFAULT_PRECIS as u32,
+                            CLIP_DEFAULT_PRECIS as u32,
+                            DEFAULT_QUALITY as u32,
+                            (DEFAULT_PITCH | FF_SWISS) as u32,
+                            face.as_ptr(),
+                        );
+                        SelectObject(hdc, hfont_fit as *mut _);
+                        DeleteObject(hfont_hdr as *mut _);
+                        hfont_hdr = hfont_fit;
+                    }
+
                     TextOutW(
                         hdc,
-                        4,
+                        content_x,
                         top_offset + 3,
                         hdr_text.as_ptr(),
                         (hdr_text.len() - 1) as i32,
@@ -352,13 +421,13 @@ mod gdi_print {
                     SelectObject(hdc, hfont_body as *mut _);
                     SetTextColor(hdc, RGB(0, 0, 0));
 
-                    let x = 4i32;
+                    let x = content_x;
                     let y0 = top_offset + hdr_h + 4;
 
                     // ── Patient name — manual word-wrap with TextOutW ─────────
                     // Avoids DrawTextW's extra GDI line-spacing which creates
                     // a phantom blank line after the text.
-                    let max_w = page_w - x * 2;
+                    let max_w = content_w;
                     let label_prefix = "Ad Soyadi: ";
                     let full_name = format!("{}{}", label_prefix, name);
 
@@ -428,12 +497,13 @@ mod gdi_print {
         }
 
         Ok(format!(
-            "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, top offset {} mm).",
+            "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, offset {} / {} mm).",
             patients.len(),
             quantity,
             printer_name,
             super::format_mm(dimensions.width_mm()),
             super::format_mm(dimensions.height_mm()),
+            super::format_mm(dimensions.left_offset_mm()),
             super::format_mm(dimensions.top_offset_mm())
         ))
     }
@@ -482,6 +552,7 @@ mod gdi_print {
                 return Err("StartDoc failed — printer may be offline.".to_string());
             }
 
+            let dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
             let dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
             let page_w = GetDeviceCaps(hdc, HORZRES);
             let page_h = GetDeviceCaps(hdc, VERTRES);
@@ -489,9 +560,11 @@ mod gdi_print {
             let font_h = (dpi_y as f32 * font_pt as f32 / 72.0).round() as i32;
             let line_h = (font_h as f32 * 1.25).round() as i32;
             let top_offset = ((dimensions.top_offset_mm() / 25.4) * dpi_y as f32).round() as i32;
-            // ~1.5 mm side margin
-            let margin = ((1.5 / 25.4) * dpi_y as f32).round() as i32;
-            let max_w = (page_w - margin * 2).max(1);
+            // Side safe zone + the user's horizontal alignment offset.
+            let side_margin = ((super::SIDE_MARGIN_MM / 25.4) * dpi_x as f32).round() as i32;
+            let left_offset = ((dimensions.left_offset_mm() / 25.4) * dpi_x as f32).round() as i32;
+            let margin = (side_margin + left_offset).max(0);
+            let max_w = (page_w - margin - side_margin).max(1);
 
             let face = to_wide("Arial");
 
@@ -558,8 +631,10 @@ mod gdi_print {
                     let wl = to_wide(line);
                     let mut sz = SIZE { cx: 0, cy: 0 };
                     GetTextExtentPoint32W(hdc, wl.as_ptr(), (wl.len() - 1) as i32, &mut sz);
+                    // Centre inside the content box, not the raw page, so the
+                    // side margin and left offset are respected.
                     let x = if center {
-                        ((page_w - sz.cx) / 2).max(margin)
+                        margin + ((max_w - sz.cx) / 2).max(0)
                     } else {
                         margin
                     };
@@ -736,12 +811,13 @@ mod macos_print {
 
         if success {
             Ok(format!(
-                "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, top offset {} mm).",
+                "Sent {} patient(s) × {} label(s) to '{}' ({} × {} mm, offset {} / {} mm).",
                 patients.len(),
                 quantity,
                 printer_name,
                 super::format_mm(dimensions.width_mm()),
                 super::format_mm(dimensions.height_mm()),
+                super::format_mm(dimensions.left_offset_mm()),
                 super::format_mm(dimensions.top_offset_mm())
             ))
         } else {
@@ -792,15 +868,18 @@ mod macos_print {
         let hdr_h = HDR_H.min(label_h * 0.35);
         let content_top = label_h - dimensions.top_offset_mm();
         let hdr_bottom = content_top - hdr_h;
+        // Side safe zone + the user's horizontal alignment offset.
+        let band_left = dimensions.left_offset_mm().max(0.0);
+        let content_x = (super::SIDE_MARGIN_MM + dimensions.left_offset_mm()).max(0.0);
 
         layer.set_fill_color(Color::Rgb(Rgb::new(0.118, 0.161, 0.231, None)));
         // In printpdf 0.7 use Polygon (with PaintMode::Fill) for filled shapes
         layer.add_polygon(Polygon {
             rings: vec![vec![
-                (Point::new(Mm(0.0), Mm(hdr_bottom)), false),
+                (Point::new(Mm(band_left), Mm(hdr_bottom)), false),
                 (Point::new(Mm(label_w), Mm(hdr_bottom)), false),
                 (Point::new(Mm(label_w), Mm(content_top)), false),
-                (Point::new(Mm(0.0), Mm(content_top)), false),
+                (Point::new(Mm(band_left), Mm(content_top)), false),
             ]],
             mode: PaintMode::Fill,
             winding_order: WindingOrder::NonZero,
@@ -811,14 +890,14 @@ mod macos_print {
         layer.use_text(
             "DENTAKAY DENTAL CLINIC",
             9.5_f32,
-            Mm(2.5),
+            Mm(content_x),
             Mm(hdr_bottom + 1.8),
             font,
         );
 
         // ── Body fields ──────────────────────────────────────────────────────
         layer.set_fill_color(Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)));
-        let x: f32 = 2.0;
+        let x: f32 = content_x;
         let font_sz: f32 = 8.5;
         let line_h: f32 = 4.5;
         let y0: f32 = hdr_bottom - 4.2;
@@ -915,8 +994,8 @@ mod macos_print {
 
         // ── Word-wrap using an average character-width estimate ──────────────
         // 1 pt = 0.352778 mm; ~0.52 is a reasonable average glyph-width ratio.
-        let margin = 2.0_f32;
-        let max_w = (label_w - margin * 2.0).max(1.0);
+        let margin = (super::SIDE_MARGIN_MM + dimensions.left_offset_mm()).max(0.0);
+        let max_w = (label_w - margin - super::SIDE_MARGIN_MM).max(1.0);
         let char_w = (font_pt * 0.352778 * 0.52).max(0.1);
         let max_chars = ((max_w / char_w).floor() as usize).max(1);
 
@@ -957,9 +1036,11 @@ mod macos_print {
             layer.set_fill_color(Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)));
             let mut baseline = block_top - ascent;
             for line in &lines {
+                // Centre inside the content box, not the raw label width, so
+                // the side margin and left offset are respected.
                 let x = if center {
                     let w = line.chars().count() as f32 * char_w;
-                    ((label_w - w) / 2.0).max(margin)
+                    margin + ((max_w - w) / 2.0).max(0.0)
                 } else {
                     margin
                 };
@@ -1153,9 +1234,14 @@ fn print_labels(
     label_width_mm: Option<f32>,
     label_height_mm: Option<f32>,
     label_top_offset_mm: Option<f32>,
+    label_left_offset_mm: Option<f32>,
 ) -> Result<String, String> {
-    let dimensions =
-        LabelDimensions::from_options(label_width_mm, label_height_mm, label_top_offset_mm);
+    let dimensions = LabelDimensions::from_options(
+        label_width_mm,
+        label_height_mm,
+        label_top_offset_mm,
+        label_left_offset_mm,
+    );
 
     #[cfg(windows)]
     {
@@ -1182,9 +1268,14 @@ fn print_text(
     label_width_mm: Option<f32>,
     label_height_mm: Option<f32>,
     label_top_offset_mm: Option<f32>,
+    label_left_offset_mm: Option<f32>,
 ) -> Result<String, String> {
-    let dimensions =
-        LabelDimensions::from_options(label_width_mm, label_height_mm, label_top_offset_mm);
+    let dimensions = LabelDimensions::from_options(
+        label_width_mm,
+        label_height_mm,
+        label_top_offset_mm,
+        label_left_offset_mm,
+    );
     // Clamp font size to a sane range; default 12 pt.
     let font_pt = font_pt.unwrap_or(12).clamp(6, 48);
     let center = align.as_deref() != Some("left");

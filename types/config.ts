@@ -5,12 +5,20 @@ export interface PrinterSettings {
   label_height_mm?: number;
   /** Vertical content offset from the top edge in millimeters */
   label_top_offset_mm?: number;
+  /**
+   * Horizontal content offset in millimeters. Positive shifts everything right.
+   * The print head's first dot is not the physical left edge of the label —
+   * the roll sits a few mm to the right of it in the media guides — so this is
+   * how the clinic corrects text being clipped off the left side.
+   */
+  label_left_offset_mm?: number;
 }
 
 export const DEFAULT_PRINTER_SETTINGS: Required<PrinterSettings> = {
   label_width_mm: 57,
   label_height_mm: 27,
   label_top_offset_mm: 0,
+  label_left_offset_mm: 0,
 };
 
 export interface ClinicConfig {

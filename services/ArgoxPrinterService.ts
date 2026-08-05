@@ -41,6 +41,9 @@ export class ArgoxPrinterService implements IPrinterService {
         labelTopOffsetMm:
           this.printerSettings.label_top_offset_mm ??
           DEFAULT_PRINTER_SETTINGS.label_top_offset_mm,
+        labelLeftOffsetMm:
+          this.printerSettings.label_left_offset_mm ??
+          DEFAULT_PRINTER_SETTINGS.label_left_offset_mm,
       });
       return { success: true, message: msg, jobId };
     } catch (err) {
@@ -66,6 +69,9 @@ export class ArgoxPrinterService implements IPrinterService {
         labelTopOffsetMm:
           this.printerSettings.label_top_offset_mm ??
           DEFAULT_PRINTER_SETTINGS.label_top_offset_mm,
+        labelLeftOffsetMm:
+          this.printerSettings.label_left_offset_mm ??
+          DEFAULT_PRINTER_SETTINGS.label_left_offset_mm,
       });
       return { success: true, message: msg, jobId };
     } catch (err) {
